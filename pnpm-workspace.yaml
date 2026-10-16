@@ -2,6 +2,7 @@ packages:
   - "apps/*"
 
 onlyBuiltDependencies:
+  - argon2
   - esbuild
   - prisma
   - "@prisma/client"
