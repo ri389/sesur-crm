@@ -50,4 +50,5 @@ pnpm build
 - Verrouillage après `AUTH_MAX_FAILED_ATTEMPTS` échecs (5) pendant `AUTH_LOCK_MINUTES` (15) ; message d'erreur identique dans tous les cas de refus.
 - Sessions stockées en base (`user_session`, seul le SHA-256 du jeton est conservé) ; expiration après `SESSION_IDLE_MINUTES` d'inactivité (30) ou `SESSION_ABSOLUTE_HOURS` (12).
 - Connexions, échecs, verrouillages et déconnexions sont tracés dans `audit_log`.
+- Interface web : sans session, `apps/web` affiche la page de connexion ; après connexion, l'espace de travail avec le nom de l'utilisateur et « Se déconnecter ». Le cookie passe par le proxy Vite (`/api` → `:3000`).
 - `user:set-password` crée un compte ou redéfinit son mot de passe (saisie masquée) et révoque ses sessions.
