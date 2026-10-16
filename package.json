@@ -1,0 +1,13 @@
+{
+  "name": "sesur-crm",
+  "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev:api": "pnpm --filter api start:dev",
+    "dev:web": "pnpm --filter web dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r build"
+  }
+}
