@@ -1,14 +1,28 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 export interface HealthStatus {
   status: 'ok';
+  database: 'up';
   uptimeSeconds: number;
 }
 
 @Controller('health')
 export class HealthController {
+  constructor(private readonly prisma: PrismaService) {}
+
   @Get()
-  check(): HealthStatus {
-    return { status: 'ok', uptimeSeconds: Math.round(process.uptime()) };
+  async check(): Promise<HealthStatus> {
+    if (!(await this.prisma.isReachable())) {
+      throw new ServiceUnavailableException({
+        status: 'error',
+        database: 'down',
+      });
+    }
+    return {
+      status: 'ok',
+      database: 'up',
+      uptimeSeconds: Math.round(process.uptime()),
+    };
   }
 }
