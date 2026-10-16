@@ -22,7 +22,7 @@ pnpm install
 pnpm --filter api db:deploy   # applique les migrations
 pnpm --filter api user:set-password --email vous@sesur.bj --first-name Prénom --last-name Nom
 pnpm dev:api              # http://localhost:3000/api/health
-pnpm dev:web              # http://localhost:5173
+pnpm dev:web              # http://localhost:18765
 ```
 
 ## Vérifications
