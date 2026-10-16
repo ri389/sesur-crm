@@ -47,6 +47,7 @@ model User {
   managedTeams     Team[]     @relation("TeamManager")
   roles            UserRole[]
   auditLogs        AuditLog[]
+  sessions         Session[]
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt        DateTime?  @map("deleted_at") @db.Timestamptz(3)
@@ -106,6 +107,26 @@ model RolePermission {
   @@id([roleId, permissionId])
   @@index([permissionId])
   @@map("role_permission")
+}
+
+/// Session de connexion côté serveur, référencée par un cookie HttpOnly.
+model Session {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  /// SHA-256 (hex) du jeton de session ; le jeton brut n'est jamais stocké.
+  tokenHash  String    @unique @map("token_hash")
+  userId     String    @map("user_id") @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// Dernière activité, pour l'expiration après inactivité.
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  /// Expiration absolue, quelle que soit l'activité.
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  ipAddress  String?   @map("ip_address")
+  userAgent  String?   @map("user_agent")
+
+  @@index([userId])
+  @@map("user_session")
 }
 
 /// Journal d'audit en ajout seul : UPDATE et DELETE sont refusés par un trigger.

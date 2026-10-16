@@ -21,7 +21,8 @@
     "postinstall": "prisma generate",
     "prisma": "dotenv -e ../../.env -- prisma",
     "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
-    "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy"
+    "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "user:set-password": "dotenv -e ../../.env -- ts-node src/scripts/set-password.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -29,6 +30,10 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@prisma/client": "^6.19.3",
+    "argon2": "^0.45.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "cookie-parser": "^1.4.7",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
@@ -38,6 +43,7 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
+    "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
