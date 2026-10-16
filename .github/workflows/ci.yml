@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: sesur
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: sesur_crm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sesur -d sesur_crm"
+          --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sesur:ci-only@localhost:5432/sesur_crm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm --filter api exec prisma migrate deploy
+      - run: pnpm --filter api test:e2e
+      - run: pnpm build

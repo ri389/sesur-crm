@@ -1,0 +1,11 @@
+packages:
+  - "apps/*"
+
+onlyBuiltDependencies:
+  - esbuild
+  - prisma
+  - "@prisma/client"
+  - "@prisma/engines"
+ignoredBuiltDependencies:
+  - "@parcel/watcher"
+  - unrs-resolver

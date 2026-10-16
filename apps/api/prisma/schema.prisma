@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Périmètre d'une permission : enregistrements propres, de l'équipe, ou tous.
+enum PermissionScope {
+  OWN
+  TEAM
+  ALL
+}
+
+model Team {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  name      String    @unique
+  managerId String?   @map("manager_id") @db.Uuid
+  manager   User?     @relation("TeamManager", fields: [managerId], references: [id])
+  members   User[]    @relation("TeamMembers")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@map("team")
+}
+
+model User {
+  id               String     @id @default(uuid(7)) @db.Uuid
+  /// Normalisé en minuscules par l'application avant écriture.
+  email            String     @unique
+  firstName        String     @map("first_name")
+  lastName         String     @map("last_name")
+  /// Argon2id ; null tant que le compte n'a pas défini son mot de passe.
+  passwordHash     String?    @map("password_hash")
+  isActive         Boolean    @default(true) @map("is_active")
+  failedLoginCount Int        @default(0) @map("failed_login_count")
+  lockedUntil      DateTime?  @map("locked_until") @db.Timestamptz(3)
+  lastLoginAt      DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  teamId           String?    @map("team_id") @db.Uuid
+  team             Team?      @relation("TeamMembers", fields: [teamId], references: [id])
+  managerId        String?    @map("manager_id") @db.Uuid
+  manager          User?      @relation("UserManager", fields: [managerId], references: [id])
+  directReports    User[]     @relation("UserManager")
+  managedTeams     Team[]     @relation("TeamManager")
+  roles            UserRole[]
+  auditLogs        AuditLog[]
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime?  @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([teamId])
+  @@map("app_user")
+}
+
+model Role {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  /// Code stable utilisé dans le code (ex. SALES_REP) ; libellé modifiable.
+  code        String           @unique
+  name        String
+  description String?
+  /// Rôle livré par le système, non supprimable depuis l'interface.
+  isSystem    Boolean          @default(false) @map("is_system")
+  users       UserRole[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("role")
+}
+
+model UserRole {
+  userId     String   @map("user_id") @db.Uuid
+  roleId     String   @map("role_id") @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(3)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_role")
+}
+
+model Permission {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  /// Ressource métier (ex. lead, opportunity, ticket).
+  resource    String
+  /// Action (ex. read, create, update, delete, approve, export).
+  action      String
+  description String?
+  roles       RolePermission[]
+
+  @@unique([resource, action])
+  @@map("permission")
+}
+
+model RolePermission {
+  roleId       String          @map("role_id") @db.Uuid
+  permissionId String          @map("permission_id") @db.Uuid
+  scope        PermissionScope
+  role         Role            @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission      @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permission")
+}
+
+/// Journal d'audit en ajout seul : UPDATE et DELETE sont refusés par un trigger.
+/// Ne jamais y stocker de mot de passe, jeton ou secret.
+model AuditLog {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id") @db.Uuid
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  metadata    Json?
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, occurredAt])
+  @@index([occurredAt])
+  @@map("audit_log")
+}
