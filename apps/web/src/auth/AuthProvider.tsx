@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { fetchCurrentUser, login, logout } from '../api'
+import { describeServerError, fetchCurrentUser, login, logout } from '../api'
 import { AuthContext, type AuthState } from './authContext'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -11,8 +11,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((user) => {
         if (!cancelled) setState(user ? { status: 'authenticated', user } : { status: 'anonymous' })
       })
-      .catch(() => {
-        if (!cancelled) setState({ status: 'error' })
+      .catch((error: unknown) => {
+        if (!cancelled) setState({ status: 'error', message: describeServerError(error) })
       })
     return () => {
       cancelled = true

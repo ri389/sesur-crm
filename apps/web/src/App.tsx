@@ -59,7 +59,7 @@ function App() {
     case 'error':
       return (
         <p role="alert" className="centered">
-          Le serveur ne répond pas. Rechargez la page dans un instant.
+          {state.message}
         </p>
       )
     case 'anonymous':

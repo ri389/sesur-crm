@@ -25,6 +25,8 @@ pnpm dev:api              # http://localhost:3000/api/health
 pnpm dev:web              # http://localhost:18765
 ```
 
+Si `docker compose up -d` signale un port déjà utilisé (par exemple un PostgreSQL installé sous Windows sur 5432), choisir un port libre dans `.env` : `POSTGRES_PORT=15432` et le même port dans `DATABASE_URL` (idem `REDIS_PORT` / `REDIS_URL`).
+
 ## Vérifications
 
 ```bash

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { ApiError } from './api'
+import { ApiError, describeServerError } from './api'
 import { useAuth } from './auth/useAuth'
 
 function errorMessage(error: unknown): string {
@@ -7,7 +7,7 @@ function errorMessage(error: unknown): string {
     if (error.status === 401) return 'Identifiants invalides.'
     if (error.status === 400) return 'Vérifiez le format de l’adresse e-mail.'
   }
-  return 'Le serveur ne répond pas. Réessayez dans un instant.'
+  return describeServerError(error)
 }
 
 export function LoginPage() {

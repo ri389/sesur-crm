@@ -3,7 +3,7 @@ import type { User } from '../api'
 
 export type AuthState =
   | { status: 'loading' }
-  | { status: 'error' }
+  | { status: 'error'; message: string }
   | { status: 'anonymous' }
   | { status: 'authenticated'; user: User }
 
