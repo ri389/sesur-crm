@@ -12,9 +12,11 @@ const USER = {
   roles: [],
 }
 
-type Route = { status: number; body?: unknown }
+/** `proxyError` : réponse vide en text/plain, comme le proxy Vite quand l'API est arrêtée. */
+type Route = { status: number; body?: unknown; proxyError?: true }
 
-function json({ status, body }: Route): Response {
+function json({ status, body, proxyError }: Route): Response {
+  if (proxyError) return new Response(null, { status, headers: { 'Content-Type': 'text/plain' } })
   return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
@@ -111,7 +113,31 @@ describe('Connexion', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
     await fillAndSubmit('awa.kone@sesur.bj', 'une phrase de passe solide')
 
-    expect((await screen.findByRole('alert')).textContent).toMatch(/serveur ne répond pas/)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/serveur est injoignable/)
+  })
+
+  it('distingue une erreur interne de l’API d’une API arrêtée derrière le proxy', async () => {
+    mockApi({
+      'GET /api/auth/me': [UNAUTHORIZED],
+      'POST /api/auth/login': [
+        { status: 500, body: { statusCode: 500, message: 'Internal server error' } },
+        { status: 500, proxyError: true },
+      ],
+    })
+    renderApp()
+    const user = await fillAndSubmit('awa.kone@sesur.bj', 'une phrase de passe solide')
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Erreur interne du serveur/)
+
+    await user.type(screen.getByLabelText('Mot de passe'), 'une phrase de passe solide')
+    await user.click(screen.getByRole('button', { name: 'Se connecter' }))
+    expect((await screen.findByRole('alert')).textContent).toMatch(/serveur est injoignable/)
+  })
+
+  it('signale une API injoignable dès le chargement, sans afficher le formulaire', async () => {
+    mockApi({ 'GET /api/auth/me': [{ status: 500, proxyError: true }] })
+    renderApp()
+    expect((await screen.findByRole('alert')).textContent).toMatch(/serveur est injoignable/)
+    expect(screen.queryByLabelText('Mot de passe')).toBeNull()
   })
 
   it('revient au formulaire après déconnexion', async () => {
