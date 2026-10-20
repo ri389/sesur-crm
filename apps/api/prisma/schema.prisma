@@ -46,9 +46,11 @@ model User {
   directReports    User[]     @relation("UserManager")
   managedTeams     Team[]     @relation("TeamManager")
   roles            UserRole[]
-  auditLogs        AuditLog[]
-  sessions         Session[]
-  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  auditLogs            AuditLog[]
+  sessions             Session[]
+  assignedLeads        Lead[]        @relation("AssignedLeads")
+  authoredInteractions Interaction[] @relation("AuthoredInteractions")
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt        DateTime?  @map("deleted_at") @db.Timestamptz(3)
 
@@ -147,4 +149,153 @@ model AuditLog {
   @@index([actorUserId, occurredAt])
   @@index([occurredAt])
   @@map("audit_log")
+}
+
+/// Statut d'un prospect (Lead).
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+}
+
+/// Canal d'interaction avec un contact ou prospect.
+enum InteractionChannel {
+  CALL
+  EMAIL
+  MEETING
+  NOTE
+  WHATSAPP
+}
+
+/// Sens de l'interaction.
+enum InteractionDirection {
+  INBOUND
+  OUTBOUND
+}
+
+/// Statut d'un produit ou service au catalogue.
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+/// Organisation (entreprise, institution, prospect ou client).
+model Organization {
+  id                 String        @id @default(uuid(7)) @db.Uuid
+  name               String
+  industry           String?
+  address            String?
+  phone              String?
+  email              String?
+  isClient           Boolean       @default(false) @map("is_client")
+  becameCustomerDate DateTime?     @map("became_customer_date") @db.Timestamptz(3)
+  status             String        @default("PROSPECT")
+  contacts           Contact[]
+  leads              Lead[]
+  interactions       Interaction[]
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt          DateTime?     @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([name])
+  @@index([isClient])
+  @@map("organization")
+}
+
+/// Contact individuel rattaché à une organisation.
+model Contact {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  organizationId String?       @map("organization_id") @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  firstName      String        @map("first_name")
+  lastName       String        @map("last_name")
+  email          String?
+  phone          String?
+  jobTitle       String?       @map("job_title")
+  preferences    String?
+  leads          Lead[]
+  interactions   Interaction[]
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([email])
+  @@index([phone])
+  @@index([organizationId])
+  @@map("contact")
+}
+
+/// Prospect commercial (Lead).
+model Lead {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  firstName      String        @map("first_name")
+  lastName       String        @map("last_name")
+  companyName    String?       @map("company_name")
+  email          String?
+  phone          String?
+  source         String        @default("AUTRE")
+  status         LeadStatus    @default(NEW)
+  score          Int           @default(0)
+  assignedUserId String?       @map("assigned_user_id") @db.Uuid
+  assignedUser   User?         @relation("AssignedLeads", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  organizationId String?       @map("organization_id") @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  contactId      String?       @map("contact_id") @db.Uuid
+  contact        Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  convertedAt    DateTime?     @map("converted_at") @db.Timestamptz(3)
+  interactions   Interaction[]
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([email])
+  @@index([phone])
+  @@index([companyName])
+  @@index([status])
+  @@index([assignedUserId])
+  @@map("lead")
+}
+
+/// Historique des interactions (appels, emails, réunions, notes, whatsapp).
+model Interaction {
+  id             String               @id @default(uuid(7)) @db.Uuid
+  channel        InteractionChannel
+  direction      InteractionDirection @default(OUTBOUND)
+  occurredAt     DateTime             @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  summary        String
+  userId         String?              @map("user_id") @db.Uuid
+  user           User?                @relation("AuthoredInteractions", fields: [userId], references: [id], onDelete: SetNull)
+  leadId         String?              @map("lead_id") @db.Uuid
+  lead           Lead?                @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  contactId      String?              @map("contact_id") @db.Uuid
+  contact        Contact?             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  organizationId String?              @map("organization_id") @db.Uuid
+  organization   Organization?        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([leadId])
+  @@index([contactId])
+  @@index([organizationId])
+  @@index([occurredAt])
+  @@map("interaction")
+}
+
+/// Article du catalogue de produits et services.
+model Product {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  sku         String        @unique
+  name        String
+  description String?
+  unitPrice   Decimal       @map("unit_price") @db.Decimal(12, 2)
+  status      ProductStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([sku])
+  @@index([status])
+  @@map("product")
 }

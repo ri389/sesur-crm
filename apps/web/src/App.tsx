@@ -1,31 +1,120 @@
 import { useEffect, useState } from 'react'
 import type { User } from './api'
+import { can } from './api'
 import { LoginPage } from './LoginPage'
 import { useAuth } from './auth/useAuth'
+import {
+  AuditPage,
+  ImportPage,
+  ProductsPage,
+  ProfilePage,
+  UsersPage,
+} from './pages/AdminPages'
+import {
+  ClientDetailPage,
+  ClientFormPage,
+  ClientsPage,
+  ContactDetailPage,
+  ContactFormPage,
+  ContactsPage,
+  HomePage,
+  LeadDetailPage,
+  LeadFormPage,
+  LeadsPage,
+} from './pages/CrmPages'
+import { parseHash, type Route } from './route'
 
-type ApiState = 'loading' | 'ok' | 'error'
+function useRoute(): Route {
+  const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash))
+  useEffect(() => {
+    const onChange = () => setRoute(parseHash(window.location.hash))
+    window.addEventListener('hashchange', onChange)
+    return () => window.removeEventListener('hashchange', onChange)
+  }, [])
+  return route
+}
 
-const NAV_ITEMS = ['Mes priorités', 'Prospects', 'Clients', 'Opportunités', 'Tickets SAV', 'Administration']
+function Screen({ route, user, onPasswordChanged }: { route: Route; user: User; onPasswordChanged: () => void }) {
+  switch (route.name) {
+    case 'home':
+      return <HomePage user={user} />
+    case 'leads':
+      return <LeadsPage user={user} />
+    case 'lead-new':
+      return <LeadFormPage user={user} />
+    case 'lead':
+      return <LeadDetailPage id={route.id} user={user} />
+    case 'clients':
+      return <ClientsPage user={user} />
+    case 'client-new':
+      return <ClientFormPage />
+    case 'client':
+      return <ClientDetailPage id={route.id} user={user} />
+    case 'contacts':
+      return <ContactsPage user={user} />
+    case 'contact-new':
+      return <ContactFormPage />
+    case 'contact':
+      return <ContactDetailPage id={route.id} user={user} />
+    case 'users':
+      return <UsersPage />
+    case 'products':
+      return <ProductsPage />
+    case 'import':
+      return <ImportPage />
+    case 'audit':
+      return <AuditPage />
+    case 'profile':
+      return <ProfilePage onPasswordChanged={onPasswordChanged} />
+    default:
+      return (
+        <>
+          <h2>Page introuvable</h2>
+          <p>Cette adresse n’existe pas.</p>
+        </>
+      )
+  }
+}
+
+function NavLink({ href, label, current }: { href: string; label: string; current: boolean }) {
+  return (
+    <a href={href} aria-current={current ? 'page' : undefined}>
+      {label}
+    </a>
+  )
+}
 
 function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
-  const [apiState, setApiState] = useState<ApiState>('loading')
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then((res) => setApiState(res.ok ? 'ok' : 'error'))
-      .catch(() => setApiState('error'))
-  }, [])
+  const route = useRoute()
 
   return (
     <div className="layout">
       <aside className="sidebar">
         <h1>SESUR CRM</h1>
         <nav aria-label="Navigation principale">
-          {NAV_ITEMS.map((label) => (
-            <a key={label} href="#">
-              {label}
-            </a>
-          ))}
+          <NavLink href="#/" label="Mes priorités" current={route.name === 'home'} />
+          {can(user, 'lead', 'read') && (
+            <NavLink href="#/leads" label="Prospects" current={route.name.startsWith('lead')} />
+          )}
+          {can(user, 'organization', 'read') && (
+            <NavLink href="#/clients" label="Clients" current={route.name.startsWith('client')} />
+          )}
+          {can(user, 'contact', 'read') && (
+            <NavLink href="#/contacts" label="Contacts" current={route.name.startsWith('contact')} />
+          )}
+          {can(user, 'user', 'read') && (
+            <NavLink href="#/admin/utilisateurs" label="Utilisateurs" current={route.name === 'users'} />
+          )}
+          {can(user, 'product', 'read') && (
+            <NavLink href="#/admin/produits" label="Catalogue" current={route.name === 'products'} />
+          )}
+          {can(user, 'import', 'create') && (
+            <NavLink href="#/admin/import" label="Import" current={route.name === 'import'} />
+          )}
+          {can(user, 'audit', 'read') && (
+            <NavLink href="#/admin/audit" label="Audit" current={route.name === 'audit'} />
+          )}
+          <NavLink href="#/profil" label="Mon profil" current={route.name === 'profile'} />
         </nav>
       </aside>
       <main>
@@ -37,14 +126,7 @@ function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
             Se déconnecter
           </button>
         </header>
-        <h2>Mes priorités</h2>
-        <p>Les écrans métier arrivent avec les lots 1 et 2.</p>
-        <p role="status">
-          État de l'API :{' '}
-          {apiState === 'loading' && 'vérification…'}
-          {apiState === 'ok' && <span className="status-ok">disponible</span>}
-          {apiState === 'error' && <span className="status-error">indisponible</span>}
-        </p>
+        <Screen route={route} user={user} onPasswordChanged={onSignOut} />
       </main>
     </div>
   )

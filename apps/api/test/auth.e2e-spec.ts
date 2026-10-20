@@ -90,7 +90,9 @@ describe('Authentification (e2e)', () => {
         email: user.email,
         firstName: 'Test',
         lastName: 'Auth',
+        teamId: null,
         roles: [],
+        permissions: [],
       },
     });
     expect(JSON.stringify(res.body)).not.toMatch(/argon2|password/i);

@@ -1,4 +1,9 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTH_SETTINGS } from './auth.settings';
@@ -7,6 +12,7 @@ import { AuthenticatedUser, RequestContext } from './auth.types';
 import { afterFailedAttempt, isLocked } from './lockout';
 import { PasswordService } from './password.service';
 import { SessionService } from './session.service';
+import { toAuthenticatedUser, USER_ACCESS_INCLUDE } from './user.mapper';
 
 /** Message unique pour ne pas révéler si le compte existe, est verrouillé ou désactivé. */
 export const INVALID_CREDENTIALS = 'Identifiants invalides';
@@ -36,7 +42,7 @@ export class AuthService {
     const email = rawEmail.trim().toLowerCase();
     const user = await this.prisma.user.findFirst({
       where: { email, deletedAt: null },
-      include: { roles: { include: { role: true } } },
+      include: USER_ACCESS_INCLUDE,
     });
 
     const refuse = async (
@@ -114,14 +120,41 @@ export class AuthService {
 
     return {
       ...session,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        roles: user.roles.map((r) => r.role.code),
-      },
+      user: toAuthenticatedUser(user),
     };
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    context: RequestContext,
+  ): Promise<void> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+    });
+    if (!user?.passwordHash) {
+      throw new UnauthorizedException(INVALID_CREDENTIALS);
+    }
+    if (!(await this.passwords.verify(user.passwordHash, currentPassword))) {
+      throw new UnauthorizedException(INVALID_CREDENTIALS);
+    }
+    const problems = this.passwords.checkPolicy(newPassword, user.email);
+    if (problems.length > 0) {
+      throw new BadRequestException(`Mot de passe refusé : ${problems.join(', ')}`);
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: await this.passwords.hash(newPassword) },
+    });
+    await this.sessions.revokeAllForUser(userId);
+    await this.audit.record({
+      action: 'auth.password.changed',
+      entityType: 'user',
+      entityId: userId,
+      actorUserId: userId,
+      ...context,
+    });
   }
 
   async logout(token: string, context: RequestContext): Promise<void> {

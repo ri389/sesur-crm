@@ -16,6 +16,7 @@ import type { AuthSettings } from './auth.settings';
 import { requestContext } from './auth.types';
 import type { AuthenticatedRequest, AuthenticatedUser } from './auth.types';
 import { CurrentUser } from './current-user.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { Public } from './public.decorator';
 
@@ -73,5 +74,22 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser): { user: AuthenticatedUser } {
     return { user };
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async changePassword(
+    @Body() body: ChangePasswordDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    await this.auth.changePassword(
+      user.id,
+      body.currentPassword,
+      body.newPassword,
+      requestContext(req),
+    );
+    res.clearCookie(SESSION_COOKIE_NAME, this.cookieOptions());
   }
 }

@@ -3,7 +3,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTH_SETTINGS } from './auth.settings';
 import type { AuthSettings } from './auth.settings';
-import { AuthenticatedUser, RequestContext } from './auth.types';
+import { RequestContext } from './auth.types';
+import { toAuthenticatedUser, USER_ACCESS_INCLUDE } from './user.mapper';
 
 /** Évite une écriture en base à chaque requête pour suivre l'activité. */
 const LAST_SEEN_RESOLUTION_MS = 60_000;
@@ -53,7 +54,7 @@ export class SessionService {
     const session = await this.prisma.session.findUnique({
       where: { tokenHash: hashToken(token) },
       include: {
-        user: { include: { roles: { include: { role: true } } } },
+        user: { include: USER_ACCESS_INCLUDE },
       },
     });
     if (!session || session.revokedAt) return null;
@@ -77,14 +78,15 @@ export class SessionService {
 
     return {
       sessionId: session.id,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        roles: user.roles.map((r) => r.role.code),
-      },
+      user: toAuthenticatedUser(user),
     };
+  }
+
+  async revokeAllForUser(userId: string, now = new Date()): Promise<void> {
+    await this.prisma.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now },
+    });
   }
 
   /** Révoque la session du jeton ; renvoie l'utilisateur concerné, s'il y en a un. */

@@ -22,6 +22,7 @@
     "prisma": "dotenv -e ../../.env -- prisma",
     "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
     "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "db:seed": "dotenv -e ../../.env -- ts-node src/scripts/seed-rbac.ts",
     "user:set-password": "dotenv -e ../../.env -- ts-node src/scripts/set-password.ts"
   },
   "dependencies": {

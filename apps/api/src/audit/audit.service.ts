@@ -20,4 +20,20 @@ export class AuditService {
   async record(entry: AuditEntry): Promise<void> {
     await this.prisma.auditLog.create({ data: entry });
   }
+
+  list(params: { action?: string; entityType?: string }) {
+    return this.prisma.auditLog.findMany({
+      where: {
+        ...(params.action ? { action: { contains: params.action } } : {}),
+        ...(params.entityType ? { entityType: params.entityType } : {}),
+      },
+      orderBy: { occurredAt: 'desc' },
+      take: 150,
+      include: {
+        actor: {
+          select: { id: true, email: true, firstName: true, lastName: true },
+        },
+      },
+    });
+  }
 }

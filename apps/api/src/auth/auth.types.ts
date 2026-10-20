@@ -1,11 +1,20 @@
+import { PermissionScope } from '@prisma/client';
 import { Request } from 'express';
+
+export interface PermissionGrant {
+  resource: string;
+  action: string;
+  scope: PermissionScope;
+}
 
 export interface AuthenticatedUser {
   id: string;
   email: string;
   firstName: string;
   lastName: string;
+  teamId: string | null;
   roles: string[];
+  permissions: PermissionGrant[];
 }
 
 export interface RequestContext {
