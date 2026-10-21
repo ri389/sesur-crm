@@ -28,31 +28,50 @@ model Team {
 }
 
 model User {
-  id               String     @id @default(uuid(7)) @db.Uuid
+  id                   String        @id @default(uuid(7)) @db.Uuid
   /// Normalisé en minuscules par l'application avant écriture.
-  email            String     @unique
-  firstName        String     @map("first_name")
-  lastName         String     @map("last_name")
+  email                String        @unique
+  firstName            String        @map("first_name")
+  lastName             String        @map("last_name")
   /// Argon2id ; null tant que le compte n'a pas défini son mot de passe.
-  passwordHash     String?    @map("password_hash")
-  isActive         Boolean    @default(true) @map("is_active")
-  failedLoginCount Int        @default(0) @map("failed_login_count")
-  lockedUntil      DateTime?  @map("locked_until") @db.Timestamptz(3)
-  lastLoginAt      DateTime?  @map("last_login_at") @db.Timestamptz(3)
-  teamId           String?    @map("team_id") @db.Uuid
-  team             Team?      @relation("TeamMembers", fields: [teamId], references: [id])
-  managerId        String?    @map("manager_id") @db.Uuid
-  manager          User?      @relation("UserManager", fields: [managerId], references: [id])
-  directReports    User[]     @relation("UserManager")
-  managedTeams     Team[]     @relation("TeamManager")
-  roles            UserRole[]
+  passwordHash         String?       @map("password_hash")
+  isActive             Boolean       @default(true) @map("is_active")
+  failedLoginCount     Int           @default(0) @map("failed_login_count")
+  lockedUntil          DateTime?     @map("locked_until") @db.Timestamptz(3)
+  lastLoginAt          DateTime?     @map("last_login_at") @db.Timestamptz(3)
+  teamId               String?       @map("team_id") @db.Uuid
+  team                 Team?         @relation("TeamMembers", fields: [teamId], references: [id])
+  managerId            String?       @map("manager_id") @db.Uuid
+  manager              User?         @relation("UserManager", fields: [managerId], references: [id])
+  directReports        User[]        @relation("UserManager")
+  managedTeams         Team[]        @relation("TeamManager")
+  roles                UserRole[]
   auditLogs            AuditLog[]
   sessions             Session[]
   assignedLeads        Lead[]        @relation("AssignedLeads")
   authoredInteractions Interaction[] @relation("AuthoredInteractions")
   createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
-  deletedAt        DateTime?  @map("deleted_at") @db.Timestamptz(3)
+  updatedAt            DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt            DateTime?     @map("deleted_at") @db.Timestamptz(3)
+
+  // Lot 2 : opportunités commerciales
+  ownedOpportunities   Opportunity[] @relation("OpportunityOwner")
+  createdOpportunities Opportunity[] @relation("OpportunityCreator")
+
+  // Lot 2 : devis
+  createdQuotes Quote[] @relation("QuoteCreator")
+
+  // Lot 2 : approbations des devis
+  requestedQuoteApprovals QuoteApproval[] @relation("QuoteApprovalRequester")
+  reviewedQuoteApprovals  QuoteApproval[] @relation("QuoteApprovalReviewer")
+
+  // Lot 2 : tâches
+  assignedTasks Task[] @relation("TaskAssignee")
+  createdTasks  Task[] @relation("TaskCreator")
+
+  // Lot 2 : agenda
+  ownedCalendarEvents   CalendarEvent[] @relation("CalendarEventOwner")
+  createdCalendarEvents CalendarEvent[] @relation("CalendarEventCreator")
 
   @@index([teamId])
   @@map("app_user")
@@ -182,23 +201,88 @@ enum ProductStatus {
   ARCHIVED
 }
 
+/// Étapes du pipeline commercial : qualification, proposition, négociation, affaire gagnée ou perdue.
+enum OpportunityStage {
+  QUALIFICATION
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+/// Statut du devis tout au long de son cycle de vie, de la création à la clôture.
+enum QuoteStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+/// Résultat ou état d'une demande d'approbation d'un devis.
+enum QuoteApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// État d'avancement d'une tâche dans le CRM.
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+/// Niveau de priorité d'une tâche pour organiser le travail.
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+/// Type d'événement pouvant être enregistré dans l'agenda.
+enum CalendarEventType {
+  MEETING
+  CALL
+  REMINDER
+  OTHER
+}
+
+/// État d'un événement de l'agenda : planifié, terminé ou annulé.
+enum CalendarEventStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
 /// Organisation (entreprise, institution, prospect ou client).
 model Organization {
-  id                 String        @id @default(uuid(7)) @db.Uuid
+  id                 String          @id @default(uuid(7)) @db.Uuid
   name               String
   industry           String?
   address            String?
   phone              String?
   email              String?
-  isClient           Boolean       @default(false) @map("is_client")
-  becameCustomerDate DateTime?     @map("became_customer_date") @db.Timestamptz(3)
-  status             String        @default("PROSPECT")
+  isClient           Boolean         @default(false) @map("is_client")
+  becameCustomerDate DateTime?       @map("became_customer_date") @db.Timestamptz(3)
+  status             String          @default("PROSPECT")
   contacts           Contact[]
   leads              Lead[]
   interactions       Interaction[]
-  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
-  deletedAt          DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt          DateTime?       @map("deleted_at") @db.Timestamptz(3)
+  opportunities      Opportunity[]
+  quotes             Quote[]
+  tasks              Task[]
+  calendarEvents     CalendarEvent[]
 
   @@index([name])
   @@index([isClient])
@@ -207,20 +291,24 @@ model Organization {
 
 /// Contact individuel rattaché à une organisation.
 model Contact {
-  id             String        @id @default(uuid(7)) @db.Uuid
-  organizationId String?       @map("organization_id") @db.Uuid
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  firstName      String        @map("first_name")
-  lastName       String        @map("last_name")
+  id             String          @id @default(uuid(7)) @db.Uuid
+  organizationId String?         @map("organization_id") @db.Uuid
+  organization   Organization?   @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  firstName      String          @map("first_name")
+  lastName       String          @map("last_name")
   email          String?
   phone          String?
-  jobTitle       String?       @map("job_title")
+  jobTitle       String?         @map("job_title")
   preferences    String?
   leads          Lead[]
   interactions   Interaction[]
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
-  deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime?       @map("deleted_at") @db.Timestamptz(3)
+  opportunities  Opportunity[]
+  quotes         Quote[]
+  tasks          Task[]
+  calendarEvents CalendarEvent[]
 
   @@index([email])
   @@index([phone])
@@ -250,6 +338,7 @@ model Lead {
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  opportunities  Opportunity[]
 
   @@index([email])
   @@index([phone])
@@ -294,8 +383,231 @@ model Product {
   status      ProductStatus @default(ACTIVE)
   createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  quoteItems  QuoteItem[]
 
   @@index([sku])
   @@index([status])
   @@map("product")
+}
+
+model Opportunity {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  name        String
+  description String?
+  stage       OpportunityStage @default(QUALIFICATION)
+
+  amount      Decimal @default(0) @db.Decimal(12, 2)
+  probability Int     @default(0) @db.SmallInt
+
+  expectedCloseDate DateTime? @map("expected_close_date") @db.Timestamptz(3)
+  closedAt          DateTime? @map("closed_at") @db.Timestamptz(3)
+  lostReason        String?   @map("lost_reason")
+
+  leadId String? @map("lead_id") @db.Uuid
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  organizationId String?       @map("organization_id") @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  contactId String?  @map("contact_id") @db.Uuid
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  ownerUserId String @map("owner_user_id") @db.Uuid
+  owner       User   @relation("OpportunityOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdBy       User   @relation("OpportunityCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  quotes         Quote[]
+  tasks          Task[]
+  calendarEvents CalendarEvent[]
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([stage])
+  @@index([ownerUserId, stage])
+  @@index([organizationId])
+  @@index([leadId])
+  @@index([expectedCloseDate])
+  @@map("opportunity")
+}
+
+model Quote {
+  id      String      @id @default(uuid(7)) @db.Uuid
+  number  String      @unique
+  version Int         @default(1)
+  status  QuoteStatus @default(DRAFT)
+
+  issueDate  DateTime  @default(now()) @map("issue_date") @db.Timestamptz(3)
+  validUntil DateTime? @map("valid_until") @db.Timestamptz(3)
+
+  currency       String  @default("XOF") @db.VarChar(3)
+  subtotal       Decimal @default(0) @db.Decimal(12, 2)
+  discountAmount Decimal @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  taxAmount      Decimal @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  total          Decimal @default(0) @db.Decimal(12, 2)
+
+  notes String?
+  terms String?
+
+  opportunityId String?      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  organizationId String?       @map("organization_id") @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  contactId String?  @map("contact_id") @db.Uuid
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdBy       User   @relation("QuoteCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  items     QuoteItem[]
+  approvals QuoteApproval[]
+  tasks     Task[]
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([status])
+  @@index([organizationId])
+  @@index([opportunityId])
+  @@index([createdByUserId])
+  @@map("quote")
+}
+
+model QuoteItem {
+  id      String @id @default(uuid(7)) @db.Uuid
+  quoteId String @map("quote_id") @db.Uuid
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  productId String?  @map("product_id") @db.Uuid
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  productSku         String? @map("product_sku")
+  productName        String  @map("product_name")
+  description        String?
+  quantity           Decimal @db.Decimal(12, 3)
+  unitPrice          Decimal @map("unit_price") @db.Decimal(12, 2)
+  discountRate       Decimal @default(0) @map("discount_rate") @db.Decimal(5, 2)
+  taxRate            Decimal @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  lineSubtotal       Decimal @map("line_subtotal") @db.Decimal(12, 2)
+  lineDiscountAmount Decimal @default(0) @map("line_discount_amount") @db.Decimal(12, 2)
+  lineTaxAmount      Decimal @default(0) @map("line_tax_amount") @db.Decimal(12, 2)
+  lineTotal          Decimal @map("line_total") @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([quoteId])
+  @@index([productId])
+  @@map("quote_item")
+}
+
+model QuoteApproval {
+  id      String @id @default(uuid(7)) @db.Uuid
+  quoteId String @map("quote_id") @db.Uuid
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+
+  status QuoteApprovalStatus @default(PENDING)
+
+  requestedByUserId String @map("requested_by_user_id") @db.Uuid
+  requestedBy       User   @relation("QuoteApprovalRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  approverUserId String @map("approver_user_id") @db.Uuid
+  approver       User   @relation("QuoteApprovalReviewer", fields: [approverUserId], references: [id], onDelete: Restrict)
+
+  requestedAt DateTime  @default(now()) @map("requested_at") @db.Timestamptz(3)
+  decidedAt   DateTime? @map("decided_at") @db.Timestamptz(3)
+  comments    String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([quoteId, requestedAt])
+  @@index([approverUserId, status])
+  @@index([requestedByUserId])
+  @@map("quote_approval")
+}
+
+model Task {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  title       String
+  description String?
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(NORMAL)
+
+  dueAt       DateTime? @map("due_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+
+  assignedUserId String? @map("assigned_user_id") @db.Uuid
+  assignedUser   User?   @relation("TaskAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdBy       User   @relation("TaskCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  opportunityId String?      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  organizationId String?       @map("organization_id") @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  contactId String?  @map("contact_id") @db.Uuid
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  quoteId String? @map("quote_id") @db.Uuid
+  quote   Quote?  @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([assignedUserId, status])
+  @@index([dueAt, status])
+  @@index([opportunityId])
+  @@index([organizationId])
+  @@index([contactId])
+  @@index([quoteId])
+  @@map("task")
+}
+
+model CalendarEvent {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  title       String
+  description String?
+  type        CalendarEventType   @default(MEETING)
+  status      CalendarEventStatus @default(SCHEDULED)
+
+  startAt DateTime @map("start_at") @db.Timestamptz(3)
+  endAt   DateTime @map("end_at") @db.Timestamptz(3)
+  allDay  Boolean  @default(false) @map("all_day")
+
+  ownerUserId String @map("owner_user_id") @db.Uuid
+  owner       User   @relation("CalendarEventOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdBy       User   @relation("CalendarEventCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  opportunityId String?      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  organizationId String?       @map("organization_id") @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  contactId String?  @map("contact_id") @db.Uuid
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([ownerUserId, startAt])
+  @@index([startAt, endAt])
+  @@index([opportunityId])
+  @@index([organizationId])
+  @@index([contactId])
+  @@map("calendar_event")
 }

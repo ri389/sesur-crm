@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { AuditService } from '../../audit/audit.service';
 import { LeadService } from '../leads/lead.service';
 import { ImportLeadsDto } from './dto/import-leads.dto';
@@ -28,7 +28,7 @@ export class ImportService {
         const lead = await this.leads.create(row, actorUserId);
         results.push({ index, status: 'created', leadId: lead.id });
       } catch (error) {
-        if (error instanceof HttpException && error.getStatus() === HttpStatus.CONFLICT) {
+        if (error instanceof HttpException && error.getStatus() === 409) {
           const body = error.getResponse() as {
             message?: string;
             candidates?: unknown;

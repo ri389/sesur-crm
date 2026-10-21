@@ -111,7 +111,9 @@ export class OrganizationService {
         ...(dto.address !== undefined
           ? { address: dto.address?.trim() || null }
           : {}),
-        ...(dto.phone !== undefined ? { phone: dto.phone?.trim() || null } : {}),
+        ...(dto.phone !== undefined
+          ? { phone: dto.phone?.trim() || null }
+          : {}),
         ...(dto.email !== undefined
           ? { email: dto.email?.trim().toLowerCase() || null }
           : {}),
@@ -130,7 +132,9 @@ export class OrganizationService {
       entityType: 'organization',
       entityId: id,
       actorUserId: actorUserId ?? null,
-      metadata: { changes: dto as Record<string, unknown> },
+      metadata: {
+        changes: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonObject,
+      },
     });
 
     return updated;

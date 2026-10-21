@@ -82,55 +82,117 @@ export function UsersPage() {
 
 export function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [isAdding, setIsAdding] = useState(false)
+
   useEffect(() => {
-    void api.products.list().then(setProducts)
+    void loadProducts()
   }, [])
+
+  async function loadProducts() {
+    setProducts(await api.products.list())
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    await api.products.create({
-      sku: form.get('sku'),
-      name: form.get('name'),
+    const status = String(form.get('status') || 'ACTIVE') as Product['status']
+    const data = {
+      sku: String(form.get('sku')),
+      name: String(form.get('name')),
+      description: String(form.get('description') ?? ''),
       unitPrice: Number(form.get('unitPrice')),
-    })
-    setProducts(await api.products.list())
+      status,
+    }
+
+    if (editingProduct) {
+      await api.products.update(editingProduct.id, data)
+    } else {
+      await api.products.create(data)
+    }
+    
+    await loadProducts()
     event.currentTarget.reset()
+    setIsAdding(false)
+    setEditingProduct(null)
   }
 
   return (
     <>
-      <h2>Catalogue</h2>
-      <form className="form" onSubmit={(e) => void submit(e)}>
-        <label>
-          Référence <input name="sku" required />
-        </label>
-        <label>
-          Nom <input name="name" required />
-        </label>
-        <label>
-          Prix <input name="unitPrice" type="number" min={0} step="0.01" required />
-        </label>
-        <button type="submit">Ajouter</button>
-      </form>
-      <table>
+      <div className="page-header">
+        <h2>Catalogue Produits</h2>
+        <button type="button" onClick={() => setIsAdding(true)}>+ Ajouter un produit</button>
+      </div>
+
+      {(isAdding || editingProduct) && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>{editingProduct ? 'Modifier le produit' : 'Nouveau produit'}</h3>
+            <form className="form" onSubmit={(e) => void submit(e)}>
+              <label>
+                Référence (SKU)
+                <input name="sku" defaultValue={editingProduct?.sku} required disabled={!!editingProduct} />
+              </label>
+              <label>
+                Nom
+                <input name="name" defaultValue={editingProduct?.name} required />
+              </label>
+              <label>
+                Description
+                <textarea name="description" defaultValue={editingProduct?.description ?? ''} />
+              </label>
+              <label>
+                Prix Unitaire
+                <input name="unitPrice" type="number" min={0} step="0.01" defaultValue={editingProduct?.unitPrice} required />
+              </label>
+              <label>
+                Statut
+                <select name="status" defaultValue={editingProduct?.status || 'ACTIVE'}>
+                  <option value="ACTIVE">Actif</option>
+                  <option value="INACTIVE">Inactif</option>
+                  <option value="ARCHIVED">Archivé</option>
+                </select>
+              </label>
+              <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={() => { setIsAdding(false); setEditingProduct(null); }}>Annuler</button>
+                <button type="submit">Enregistrer</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <table className="data-table">
         <thead>
           <tr>
             <th>SKU</th>
             <th>Nom</th>
             <th>Prix</th>
             <th>Statut</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {products.map((product) => (
             <tr key={product.id}>
-              <td>{product.sku}</td>
+              <td><strong>{product.sku}</strong></td>
               <td>{product.name}</td>
-              <td>{String(product.unitPrice)}</td>
-              <td>{product.status}</td>
+              <td>{new Intl.NumberFormat('fr-BJ', { style: 'currency', currency: 'XOF' }).format(Number(product.unitPrice))}</td>
+              <td>
+                <span className={`badge badge-${product.status.toLowerCase()}`}>
+                  {product.status}
+                </span>
+              </td>
+              <td>
+                <button type="button" onClick={() => setEditingProduct(product)}>Modifier</button>
+              </td>
             </tr>
           ))}
+          {products.length === 0 && (
+            <tr>
+              <td colSpan={5} className="centered">Aucun produit trouvé.</td>
+            </tr>
+          )}
         </tbody>
       </table>
     </>

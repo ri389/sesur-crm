@@ -86,6 +86,8 @@ function NavLink({ href, label, current }: { href: string; label: string; curren
 
 function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   const route = useRoute()
+  console.log('Utilisateur connecté :', user)
+  console.log('Permissions :', user.permissions)
 
   return (
     <div className="layout">

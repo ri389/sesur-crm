@@ -24,5 +24,8 @@ export default tseslint.config(
         { allowConstantExport: true },
       ],
     },
+    parserOptions: {
+      tsconfigRootDir: apps/web,
+    },
   },
 )

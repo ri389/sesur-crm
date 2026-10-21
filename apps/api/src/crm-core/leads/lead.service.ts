@@ -42,7 +42,9 @@ export class LeadService {
               OR: [
                 { firstName: { contains: params.search, mode: 'insensitive' } },
                 { lastName: { contains: params.search, mode: 'insensitive' } },
-                { companyName: { contains: params.search, mode: 'insensitive' } },
+                {
+                  companyName: { contains: params.search, mode: 'insensitive' },
+                },
                 { email: { contains: params.search, mode: 'insensitive' } },
                 { phone: { contains: params.search } },
               ],
@@ -158,15 +160,21 @@ export class LeadService {
     const updated = await this.prisma.lead.update({
       where: { id },
       data: {
-        ...(dto.firstName !== undefined ? { firstName: dto.firstName.trim() } : {}),
-        ...(dto.lastName !== undefined ? { lastName: dto.lastName.trim() } : {}),
+        ...(dto.firstName !== undefined
+          ? { firstName: dto.firstName.trim() }
+          : {}),
+        ...(dto.lastName !== undefined
+          ? { lastName: dto.lastName.trim() }
+          : {}),
         ...(dto.companyName !== undefined
           ? { companyName: dto.companyName?.trim() || null }
           : {}),
         ...(dto.email !== undefined
           ? { email: dto.email?.trim().toLowerCase() || null }
           : {}),
-        ...(dto.phone !== undefined ? { phone: dto.phone?.trim() || null } : {}),
+        ...(dto.phone !== undefined
+          ? { phone: dto.phone?.trim() || null }
+          : {}),
         ...(dto.source !== undefined ? { source: dto.source } : {}),
         ...(dto.status !== undefined ? { status: dto.status } : {}),
         ...(dto.score !== undefined ? { score: dto.score } : {}),
@@ -181,7 +189,7 @@ export class LeadService {
       entityType: 'lead',
       entityId: id,
       actorUserId: actorUserId ?? null,
-      metadata: { changes: dto as Record<string, unknown> },
+      metadata: { changes: { ...dto } },
     });
 
     return updated;
@@ -212,7 +220,12 @@ export class LeadService {
     actorUserId?: string,
     access?: AccessContext,
   ): Promise<Lead> {
-    return this.update(id, { status: LeadStatus.QUALIFIED }, actorUserId, access);
+    return this.update(
+      id,
+      { status: LeadStatus.QUALIFIED },
+      actorUserId,
+      access,
+    );
   }
 
   async convertToClient(
@@ -223,7 +236,9 @@ export class LeadService {
     const lead = await this.findById(id, access);
 
     if (lead.status === LeadStatus.CONVERTED) {
-      throw new BadRequestException('Ce prospect a déjà été converti en client.');
+      throw new BadRequestException(
+        'Ce prospect a déjà été converti en client.',
+      );
     }
 
     const now = new Date();

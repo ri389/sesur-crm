@@ -38,6 +38,21 @@ export interface Lead {
   interactions?: Interaction[]
 }
 
+export interface CreateLeadDto {
+  firstName: string
+  lastName: string
+  companyName?: string | null
+  email?: string | null
+  phone?: string | null
+  source: string
+}
+
+export interface UpdateLeadDto extends Partial<CreateLeadDto> {
+  status?: 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'UNQUALIFIED' | 'CONVERTED'
+  score?: number
+  assignedUserId?: string | null
+}
+
 export interface Organization {
   id: string
   name: string
@@ -53,6 +68,18 @@ export interface Organization {
   _count?: { contacts: number; leads: number; interactions: number }
 }
 
+export interface CreateOrganizationDto {
+  name: string
+  industry?: string | null
+  address?: string | null
+  phone?: string | null
+  email?: string | null
+  isClient: boolean
+  status: string
+}
+
+export interface UpdateOrganizationDto extends Partial<CreateOrganizationDto> {}
+
 export interface Contact {
   id: string
   firstName: string
@@ -65,6 +92,17 @@ export interface Contact {
   organization?: { id: string; name: string; isClient: boolean } | null
   interactions?: Interaction[]
 }
+
+export interface CreateContactDto {
+  firstName: string
+  lastName: string
+  email?: string | null
+  phone?: string | null
+  jobTitle?: string | null
+  organizationId?: string | null
+}
+
+export interface UpdateContactDto extends Partial<CreateContactDto> {}
 
 export interface Interaction {
   id: string
@@ -83,6 +121,16 @@ export interface Product {
   unitPrice: string | number
   status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
 }
+
+export interface CreateProductDto {
+  sku: string
+  name: string
+  description?: string | null
+  unitPrice: number
+  status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
+}
+
+export interface UpdateProductDto extends Partial<CreateProductDto> {}
 
 export interface DirectoryUser {
   id: string
@@ -127,7 +175,6 @@ export class ApiError extends Error {
   }
 }
 
-/** L'API n'a pas pu être jointe : arrêtée, réseau coupé, ou proxy sans réponse de sa part. */
 export class ApiUnreachableError extends Error {}
 
 const GATEWAY_STATUSES = [502, 503, 504]
@@ -190,28 +237,42 @@ export async function changePassword(currentPassword: string, newPassword: strin
 export const api = {
   search: (q: string) => request<{ results: SearchHit[] }>(`/search?q=${encodeURIComponent(q)}`),
   leads: {
-    list: (search = '') => request<Lead[]>(`/leads${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+    list: (search = '') =>
+      request<Lead[]>(
+        `/leads${search ? `?search=${encodeURIComponent(search)}` : ''}`,
+      ),
     get: (id: string) => request<Lead>(`/leads/${id}`),
-    create: (body: Record<string, unknown>) =>
+    create: (body: CreateLeadDto) =>
       request<Lead>('/leads', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: string, body: Record<string, unknown>) =>
+    update: (id: string, body: UpdateLeadDto) =>
       request<Lead>(`/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     qualify: (id: string) => request<Lead>(`/leads/${id}/qualify`, { method: 'POST' }),
     convert: (id: string) =>
-      request<{ lead: Lead; organization: Organization }>(`/leads/${id}/convert`, { method: 'POST' }),
+      request<{ lead: Lead; organization: Organization; contact: Contact }>(`/leads/${id}/convert`, { method: 'POST' }),
   },
   organizations: {
     list: (clientsOnly = false) =>
       request<Organization[]>(`/organizations${clientsOnly ? '?isClient=true' : ''}`),
     get: (id: string) => request<Organization>(`/organizations/${id}`),
-    create: (body: Record<string, unknown>) =>
+    create: (body: CreateOrganizationDto) =>
       request<Organization>('/organizations', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: string, body: UpdateOrganizationDto) =>
+      request<Organization>(`/organizations/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    delete: (id: string) =>
+      request<void>(`/organizations/${id}`, { method: 'DELETE' }),
   },
   contacts: {
-    list: () => request<Contact[]>('/contacts'),
+    list: (orgId?: string, search = '') =>
+      request<Contact[]>(
+        `/contacts${orgId ? `?organizationId=${orgId}` : ''}${search ? `${orgId ? '&' : '?'}search=${encodeURIComponent(search)}` : ''}`,
+      ),
     get: (id: string) => request<Contact>(`/contacts/${id}`),
-    create: (body: Record<string, unknown>) =>
+    create: (body: CreateContactDto) =>
       request<Contact>('/contacts', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: string, body: UpdateContactDto) =>
+      request<Contact>(`/contacts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    delete: (id: string) =>
+      request<void>(`/contacts/${id}`, { method: 'DELETE' }),
   },
   interactions: {
     create: (body: Record<string, unknown>) =>
@@ -219,8 +280,11 @@ export const api = {
   },
   products: {
     list: () => request<Product[]>('/products'),
-    create: (body: Record<string, unknown>) =>
+    get: (id: string) => request<Product>(`/products/${id}`),
+    create: (body: CreateProductDto) =>
       request<Product>('/products', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: string, body: UpdateProductDto) =>
+      request<Product>(`/products/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   },
   users: {
     list: () => request<DirectoryUser[]>('/users'),
@@ -256,7 +320,8 @@ export function can(user: User, resource: string, action: string): boolean {
 }
 
 export function candidatesOf(error: unknown): DuplicateCandidate[] {
-  if (!(error instanceof ApiError) || error.status !== 409) return []
-  const raw = error.body?.candidates
-  return Array.isArray(raw) ? (raw as DuplicateCandidate[]) : []
+  if (error instanceof ApiError && error.status === 409) {
+    return (error.body?.candidates as DuplicateCandidate[]) || []
+  }
+  return []
 }

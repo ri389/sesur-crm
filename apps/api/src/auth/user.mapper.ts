@@ -43,5 +43,9 @@ export function toAuthenticatedUser(user: UserWithAccess): AuthenticatedUser {
 }
 
 export const USER_ACCESS_INCLUDE = {
-  roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
+  roles: {
+    include: {
+      role: { include: { permissions: { include: { permission: true } } } },
+    },
+  },
 } as const;

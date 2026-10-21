@@ -6,6 +6,8 @@ import type { AuthSettings } from './auth.settings';
 import { RequestContext } from './auth.types';
 import { toAuthenticatedUser, USER_ACCESS_INCLUDE } from './user.mapper';
 
+type AuthenticatedUser = ReturnType<typeof toAuthenticatedUser>;
+
 /** Évite une écriture en base à chaque requête pour suivre l'activité. */
 const LAST_SEEN_RESOLUTION_MS = 60_000;
 
