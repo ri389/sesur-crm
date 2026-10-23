@@ -86,17 +86,18 @@ function Screen({ route, user, onPasswordChanged }: { route: Route; user: User; 
   return <QuoteEditPage id={route.id} user={user} />
     default:
       return (
-        <>
+        <div className="panel surface-panel centered-panel">
           <h2>Page introuvable</h2>
           <p>Cette adresse n’existe pas.</p>
-        </>
+        </div>
       )
   }
 }
 
 function NavLink({ href, label, current }: { href: string; label: string; current: boolean }) {
   return (
-    <a href={href} aria-current={current ? 'page' : undefined}>
+    <a href={href} aria-current={current ? 'page' : undefined} className={current ? 'nav-item active' : 'nav-item'}>
+      <span className="nav-dot" aria-hidden="true" />
       {label}
     </a>
   )
@@ -109,9 +110,16 @@ function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
 
   return (
     <div className="layout">
-      <aside className="sidebar">
-        <h1>SESUR CRM</h1>
-        <nav aria-label="Navigation principale">
+      <aside className="sidebar" aria-label="Navigation principale">
+        <div className="brand-block" aria-label="SESUR CRM">
+          <div className="brand-mark">S</div>
+          <div className="brand-copy">
+            <strong>SESUR</strong>
+            <span>CRM</span>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav" aria-label="Navigation principale">
           <NavLink href="#/" label="Mes priorités" current={route.name === 'home'} />
           {can(user, 'lead', 'read') && (
             <NavLink href="#/leads" label="Prospects" current={route.name.startsWith('lead')} />
@@ -146,15 +154,35 @@ function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
           )}
           <NavLink href="#/profil" label="Mon profil" current={route.name === 'profile'} />
         </nav>
-      </aside>
-      <main>
-        <header className="topbar">
-          <span>
-            {user.firstName} {user.lastName}
-          </span>
-          <button type="button" onClick={onSignOut}>
-            Se déconnecter
+
+        <div className="sidebar-profile">
+          <div className="profile-avatar" aria-hidden="true">
+            {user.firstName?.charAt(0)?.toUpperCase() ?? 'U'}
+            {user.lastName?.charAt(0)?.toUpperCase() ?? 'S'}
+          </div>
+          <div className="profile-meta">
+            <strong>
+              {user.firstName} {user.lastName}
+            </strong>
+            <span>Opérateur CRM</span>
+          </div>
+          <button type="button" className="ghost-button" onClick={onSignOut}>
+            Déconnexion
           </button>
+        </div>
+      </aside>
+
+      <main className="main-panel">
+        <header className="topbar" aria-label="Barre d'outils">
+          <div>
+            <span className="eyebrow">Centre de commande</span>
+            <h1>SESUR CRM</h1>
+          </div>
+          <div className="topbar-actions">
+            <button type="button" className="chip-button">
+              {user.firstName} {user.lastName}
+            </button>
+          </div>
         </header>
         <Screen route={route} user={user} onPasswordChanged={onSignOut} />
       </main>
