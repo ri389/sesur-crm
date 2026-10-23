@@ -7,6 +7,8 @@ import { CrmCoreModule } from './crm-core/crm-core.module';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
+import { OpportunitiesModule } from './opportunities/opportunities.module';
+import { QuotesModule } from './quotes/quotes.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     CatalogModule,
     CrmCoreModule,
+    OpportunitiesModule,
+    QuotesModule,
   ],
   controllers: [HealthController],
 })

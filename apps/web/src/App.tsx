@@ -3,6 +3,7 @@ import type { User } from './api'
 import { can } from './api'
 import { LoginPage } from './LoginPage'
 import { useAuth } from './auth/useAuth'
+import { QuotesPage, QuoteFormPage, QuoteDetailPage, QuoteEditPage } from './pages/QuotesPage'
 import {
   AuditPage,
   ImportPage,
@@ -21,6 +22,9 @@ import {
   LeadDetailPage,
   LeadFormPage,
   LeadsPage,
+  OpportunitiesPage,
+  OpportunityFormPage,
+  OpportunityDetailPage,
 } from './pages/CrmPages'
 import { parseHash, type Route } from './route'
 
@@ -56,6 +60,12 @@ function Screen({ route, user, onPasswordChanged }: { route: Route; user: User; 
       return <ContactFormPage />
     case 'contact':
       return <ContactDetailPage id={route.id} user={user} />
+    case 'opportunities':
+      return <OpportunitiesPage user={user} />
+    case 'opportunity-new':
+      return <OpportunityFormPage user={user} />
+    case 'opportunity':
+      return <OpportunityDetailPage id={route.id} user={user} />
     case 'users':
       return <UsersPage />
     case 'products':
@@ -66,6 +76,14 @@ function Screen({ route, user, onPasswordChanged }: { route: Route; user: User; 
       return <AuditPage />
     case 'profile':
       return <ProfilePage onPasswordChanged={onPasswordChanged} />
+    case 'quote-new':
+      return <QuoteFormPage user={user} />
+    case 'quotes':
+      return <QuotesPage user={user} />
+    case 'quote':
+  return <QuoteDetailPage id={route.id} user={user} />
+    case 'quote-edit':
+  return <QuoteEditPage id={route.id} user={user} />
     default:
       return (
         <>
@@ -103,6 +121,16 @@ function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
           )}
           {can(user, 'contact', 'read') && (
             <NavLink href="#/contacts" label="Contacts" current={route.name.startsWith('contact')} />
+          )}
+          {can(user, 'opportunity', 'read') && (
+            <NavLink href="#/opportunities" label="Opportunités" current={route.name === 'opportunities'} />
+          )}
+          {can(user, 'quote', 'read') && (
+            <NavLink
+              href="#/quotes"
+              label="Devis"
+              current={route.name === 'quotes' || route.name === 'quote' || route.name === 'quote-new'}
+            />
           )}
           {can(user, 'user', 'read') && (
             <NavLink href="#/admin/utilisateurs" label="Utilisateurs" current={route.name === 'users'} />

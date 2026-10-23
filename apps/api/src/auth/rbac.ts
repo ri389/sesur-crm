@@ -6,6 +6,7 @@ export const RESOURCES = [
   'team',
   'role',
   'lead',
+  'opportunity',
   'contact',
   'organization',
   'product',
@@ -14,6 +15,7 @@ export const RESOURCES = [
   'import',
   'search',
   'duplicate',
+  'quote',
 ] as const;
 
 export type Resource = (typeof RESOURCES)[number];
@@ -73,6 +75,8 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       ...grants('user', ['read'], PermissionScope.ALL),
       ...grants('audit', ['read'], PermissionScope.ALL),
       ...grants('search', ['read'], PermissionScope.ALL),
+      ...grants('opportunity', ['read'], PermissionScope.ALL),
+      ...grants('quote', ['read'], PermissionScope.ALL),
     ],
   },
   {
@@ -90,6 +94,8 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       ...grants('import', ['create'], PermissionScope.ALL),
       ...grants('search', ['read'], PermissionScope.ALL),
       ...grants('audit', ['read'], PermissionScope.ALL),
+      ...grants('opportunity', [...CRUD], PermissionScope.ALL),
+      ...grants('quote', [...CRUD], PermissionScope.ALL),
     ],
   },
   {
@@ -103,6 +109,8 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       ...grants('interaction', ['read', 'create'], PermissionScope.ALL),
       ...grants('product', ['read'], PermissionScope.ALL),
       ...grants('search', ['read'], PermissionScope.ALL),
+      ...grants('opportunity',['read', 'create', 'update'],PermissionScope.TEAM,),
+      ...grants('quote', ['read', 'create', 'update'], PermissionScope.TEAM),
     ],
   },
   {

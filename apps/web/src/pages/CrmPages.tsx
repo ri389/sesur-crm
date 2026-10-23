@@ -21,6 +21,7 @@ const LEAD_LABEL: Record<Lead['status'], string> = {
 }
 
 type CreateLeadDto = Parameters<typeof api.leads.create>[0]
+type CreateOpportunityDto = Parameters<typeof api.opportunities.create>[0]
 
 function ErrorText({ error }: { error: unknown }) {
   if (!error) return null
@@ -672,6 +673,313 @@ export function ContactDetailPage({ id, user }: { id: string; user: User }) {
       <h3>Interactions</h3>
       <InteractionList items={contact.interactions} />
       {can(user, 'interaction', 'create') && <InteractionForm target={{ contactId: contact.id }} />}
+    </>
+  )
+}
+
+const OPPORTUNITY_STAGES = ['QUALIFICATION', 'PROPOSAL', 'NEGOTIATION', 'WON', 'LOST'] as const satisfies readonly Opportunity['stage'][]
+
+const OPPORTUNITY_LABELS: Partial<Record<Opportunity['stage'], string>> = {
+  QUALIFICATION: 'Qualification',
+  PROPOSAL: 'Proposition',
+  NEGOTIATION: 'Négociation',
+  WON: 'Gagnée',
+  LOST: 'Perdue',
+}
+
+function opportunityStageLabel(stage: Opportunity['stage']) {
+  return OPPORTUNITY_LABELS[stage] ?? stage
+}
+
+function opportunityAmount(amount: Opportunity['amount']) {
+  const value = Number(amount)
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency: 'EUR',
+  }).format(Number.isFinite(value) ? value : 0)
+}
+
+function opportunityDate(value: string | Date | null | undefined) {
+  if (!value) return 'Non définie'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Non définie' : date.toLocaleDateString('fr-FR')
+}
+
+export function OpportunitiesPage({ user }: { user: User }) {
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([])
+  const [error, setError] = useState<unknown>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+
+    api.opportunities.list()
+      .then((res) => {
+        if (!active) return
+        const payload: unknown = res
+        const data = Array.isArray(payload)
+          ? payload
+          : payload && typeof payload === 'object' && 'results' in payload && Array.isArray(payload.results)
+            ? payload.results
+            : []
+        setOpportunities(data as Opportunity[])
+      })
+      .catch((err) => {
+        if (active) setError(err)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => { active = false }
+  }, [refreshKey])
+
+  async function updateStage(id: string, stage: Opportunity['stage']) {
+    setError(null)
+    setUpdatingId(id)
+    try {
+      await api.opportunities.updateStage(id, { stage })
+      setRefreshKey((value) => value + 1)
+    } catch (err) {
+      setError(err)
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  const totalAmount = opportunities.reduce((sum, opp) => sum + (Number(opp.amount) || 0), 0)
+  const weightedAmount = opportunities.reduce(
+    (sum, opp) => sum + (Number(opp.amount) || 0) * (Number(opp.probability) || 0) / 100,
+    0,
+  )
+  const activeCount = opportunities.filter((opp) => !['WON', 'LOST'].includes(opp.stage)).length
+
+  if (loading) return <p className="centered">Chargement des opportunités…</p>
+
+  return (
+    <>
+      <header className="page-head">
+        <h2>Opportunités</h2>
+        {can(user, 'opportunity', 'create') && (
+          <a className="button" href="#/opportunities/nouveau">+ Nouvelle opportunité</a>
+        )}
+      </header>
+
+      <ErrorText error={error} />
+
+      <div className="stats-grid">
+        <section className="stat-card"><span>Opportunités actives</span><strong>{activeCount}</strong></section>
+        <section className="stat-card"><span>Valeur totale</span><strong>{opportunityAmount(totalAmount)}</strong></section>
+        <section className="stat-card"><span>Valeur pondérée</span><strong>{opportunityAmount(weightedAmount)}</strong></section>
+      </div>
+
+      {opportunities.length === 0 ? (
+        <div className="empty-state">
+          <p>Aucune opportunité pour le moment.</p>
+          {can(user, 'opportunity', 'create') && (
+            <a className="button" href="#/opportunities/nouveau">Créer la première opportunité</a>
+          )}
+        </div>
+      ) : (
+        <div className="kanban" role="list" aria-label="Pipeline des opportunités">
+          {OPPORTUNITY_STAGES.map((stage) => {
+            const items = opportunities.filter((opp) => opp.stage === stage)
+            return (
+              <section key={stage} className="kanban-col" aria-label={opportunityStageLabel(stage)}>
+                <div className="kanban-col-header">
+                  <h3>{opportunityStageLabel(stage)}</h3>
+                  <span className="count">{items.length}</span>
+                </div>
+                {items.map((opp) => (
+                  <article key={opp.id} className="card" role="listitem">
+                    <div className="card-body">
+                      <div className="card-header">
+                        <strong className="card-title">
+                          <a href={`#/opportunities/${opp.id}`}>{opp.name}</a>
+                        </strong>
+                      </div>
+                      <span className="card-subtitle">{opp.organization?.name ?? 'Sans organisation'}</span>
+                      <div className="card-footer">
+                        <span className="amount">{opportunityAmount(opp.amount)}</span>
+                        <span className="prob">{Number(opp.probability) || 0}%</span>
+                        <span className="date">{opportunityDate(opp.expectedCloseDate)}</span>
+                      </div>
+                      {can(user, 'opportunity', 'update') && (
+                        <div className="card-actions">
+                          <label>
+                            <span className="sr-only">Étape de {opp.name}</span>
+                            <select
+                              value={opp.stage}
+                              disabled={updatingId === opp.id}
+                              onChange={(event) => void updateStage(opp.id, event.target.value as Opportunity['stage'])}
+                            >
+                              {OPPORTUNITY_STAGES.map((nextStage) => (
+                                <option key={nextStage} value={nextStage}>{opportunityStageLabel(nextStage)}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </section>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
+}
+
+export function OpportunityFormPage({ user }: { user: User }) {
+  const [organizations, setOrganizations] = useState<Organization[]>([])
+  const [error, setError] = useState<unknown>(null)
+  const [saving, setSaving] = useState(false)
+  const [loadingOrganizations, setLoadingOrganizations] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    api.organizations.list()
+      .then((rows) => { if (active) setOrganizations(rows) })
+      .catch((err) => { if (active) setError(err) })
+      .finally(() => { if (active) setLoadingOrganizations(false) })
+    return () => { active = false }
+  }, [])
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (saving) return
+    const form = new FormData(event.currentTarget)
+    const amount = String(form.get('amount') ?? '').trim()
+    const expectedCloseDate = String(form.get('expectedCloseDate') ?? '').trim()
+    const organizationId = String(form.get('organizationId') ?? '').trim()
+
+    const body: CreateOpportunityDto = {
+      name: String(form.get('name') ?? '').trim(),
+      amount: amount || undefined,
+      probability: Number(form.get('probability')),
+      expectedCloseDate: expectedCloseDate || undefined,
+      organizationId: organizationId || undefined,
+    }
+
+    setError(null)
+    setSaving(true)
+    try {
+      const opp = await api.opportunities.create(body)
+      window.location.hash = `#/opportunities/${opp.id}`
+    } catch (err) {
+      setError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!can(user, 'opportunity', 'create')) {
+    return <><h2>Nouvelle opportunité</h2><p role="alert">Tu n'as pas l'autorisation de créer une opportunité.</p><a href="#/opportunities" className="btn-secondary">Retour au pipeline</a></>
+  }
+
+  return (
+    <>
+      <div className="page-header">
+        <h2>Nouvelle opportunité</h2>
+        <a href="#/opportunities" className="btn-secondary">Retour</a>
+      </div>
+      <ErrorText error={error} />
+      <form className="form" onSubmit={(event) => void submit(event)}>
+        <label>
+          Nom de l'opportunité <input name="name" required maxLength={200} />
+        </label>
+        <div className="form-row">
+          <label>
+            Montant estimé (€) <input name="amount" type="number" min="0" step="0.01" />
+          </label>
+          <label>
+            Probabilité (%) <input name="probability" type="number" min="0" max="100" step="1" defaultValue="50" required />
+          </label>
+        </div>
+        <label>
+          Date de clôture prévue <input name="expectedCloseDate" type="date" />
+        </label>
+        <label>
+          Organisation
+          <select name="organizationId" defaultValue="" disabled={loadingOrganizations}>
+            <option value="">Aucune organisation</option>
+            {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
+          </select>
+          {loadingOrganizations && <small>Chargement des organisations…</small>}
+        </label>
+        <div className="form-actions">
+          <button type="submit" disabled={saving || loadingOrganizations}>
+            {saving ? 'Enregistrement…' : "Enregistrer l'opportunité"}
+          </button>
+        </div>
+      </form>
+    </>
+  )
+}
+
+export function OpportunityDetailPage({ id, user }: { id: string; user: User }) {
+  const [opp, setOpp] = useState<Opportunity | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    api.opportunities.get(id)
+      .then((row) => { if (active) setOpp(row) })
+      .catch((err) => { if (active) setError(err) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [id])
+
+  if (loading) return <p className="centered">Chargement des détails…</p>
+  if (error) return <><ErrorText error={error} /><a href="#/opportunities" className="btn-secondary">Retour au pipeline</a></>
+  if (!opp) return <p>Opportunité introuvable. <a href="#/opportunities">Retour au pipeline</a></p>
+
+  return (
+    <>
+      <header className="page-head">
+        <h2>{opp.name}</h2>
+        <span className="badge">{opportunityStageLabel(opp.stage)}</span>
+      </header>
+      <div className="detail-grid">
+        <div className="detail-section">
+          <h3>Informations générales</h3>
+          <p><strong>Organisation :</strong> {opp.organization?.name ?? 'Non spécifiée'}</p>
+          <p><strong>Montant :</strong> {opportunityAmount(opp.amount)}</p>
+          <p><strong>Probabilité :</strong> {Number(opp.probability) || 0}%</p>
+          <p><strong>Date de clôture prévue :</strong> {opportunityDate(opp.expectedCloseDate)}</p>
+          {opp.description && <p><strong>Description :</strong> {opp.description}</p>}
+        </div>
+        <div className="detail-section">
+          <h3>Actions</h3>
+          {can(user, 'opportunity', 'update') ? (
+            <label>
+              Étape
+              <select
+                value={opp.stage}
+                onChange={(event) => {
+                  const stage = event.target.value as Opportunity['stage']
+                  void api.opportunities.updateStage(opp.id, { stage })
+                    .then(() => api.opportunities.get(id).then(setOpp))
+                    .catch(setError)
+                }}
+              >
+                {OPPORTUNITY_STAGES.map((stage) => <option key={stage} value={stage}>{opportunityStageLabel(stage)}</option>)}
+              </select>
+            </label>
+          ) : <p>Tu peux consulter cette opportunité, mais tu ne peux pas la modifier.</p>}
+        </div>
+      </div>
+      <div className="actions">
+        <a href="#/opportunities" className="btn-secondary">Retour au pipeline</a>
+      </div>
     </>
   )
 }

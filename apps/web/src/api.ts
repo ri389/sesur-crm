@@ -132,6 +132,61 @@ export interface CreateProductDto {
 
 export interface UpdateProductDto extends Partial<CreateProductDto> {}
 
+export type QuoteStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'SENT'
+  | 'ACCEPTED'
+  | 'DECLINED'
+  | 'EXPIRED'
+  | 'CANCELLED'
+
+export interface QuoteItem {
+  productId: string | null
+  productName: string
+  unitPrice: number
+  quantity: number
+  discount: number
+  totalLine: number
+}
+
+export interface Quote {
+  id: string
+  quoteNumber: string
+  organizationId: string
+  contactId?: string | null
+  status: QuoteStatus
+  items: QuoteItem[]
+  subTotal: number
+  totalDiscount: number
+  taxAmount: number
+  totalTTC: number
+  createdAt: string
+  updatedAt: string
+  createdBy: string
+}
+
+export interface CreateQuoteDto {
+  organizationId: string
+  contactId?: string
+  items: {
+    productId: string
+    quantity: number
+    discount?: number
+  }[]
+  globalDiscount?: number
+}
+
+export interface UpdateQuoteDto {
+  items?: {
+    productId: string
+    quantity: number
+    discount?: number
+  }[]
+  globalDiscount?: number
+}
 export interface DirectoryUser {
   id: string
   email: string
@@ -148,11 +203,32 @@ export interface Role {
   name: string
 }
 
-export interface SearchHit {
-  type: 'LEAD' | 'CONTACT' | 'ORGANIZATION' | 'PRODUCT'
+export interface Opportunity {
   id: string
-  title: string
-  subtitle?: string | null
+  name: string
+  amount: number
+  probability: number
+  closeDate: string
+  stage: 'QUALIFIED' | 'PROPOSAL' | 'NEGOTIATION' | 'CLOSED_WON' | 'CLOSED_LOST'
+  organizationId: string
+  organization?: { id: string; name: string }
+  userId?: string | null
+  user?: { id: string; firstName: string; lastName: string }
+}
+
+export interface CreateOpportunityDto {
+  name: string
+  amount: number
+  probability: number
+  closeDate: string
+  stage: Opportunity['stage']
+  organizationId: string
+}
+
+export interface UpdateOpportunityDto extends Partial<CreateOpportunityDto> {}
+
+export interface UpdateOpportunityStageDto {
+  stage: Opportunity['stage']
 }
 
 export interface AuditRow {
@@ -291,6 +367,36 @@ export const api = {
     create: (body: Record<string, unknown>) =>
       request<DirectoryUser>('/users', { method: 'POST', body: JSON.stringify(body) }),
   },
+  opportunities: {
+    list: () => request<Opportunity[]>('/opportunities'),
+    get: (id: string) => request<Opportunity>(`/opportunities/${id}`),
+    create: (body: CreateOpportunityDto) =>
+      request<Opportunity>('/opportunities', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateStage: (id: string, body: UpdateOpportunityStageDto) =>
+      request<Opportunity>(`/opportunities/${id}/stage`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+  },
+  
+  quotes: {
+    list: () => request<Quote[]>('/quotes'),
+    get: (id: string) => request<Quote>(`/quotes/${id}`),
+    create: (body: CreateQuoteDto) =>
+      request<Quote>('/quotes', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    update: (id: string, body: UpdateQuoteDto) =>
+      request<Quote>(`/quotes/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+  },
+
   roles: () => request<Role[]>('/roles'),
   importLeads: (rows: Record<string, unknown>[]) =>
     request<{ results: Array<{ index: number; status: string; message?: string }> }>('/imports/leads', {

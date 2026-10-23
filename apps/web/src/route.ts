@@ -14,8 +14,14 @@ export type Route =
   | { name: 'import' }
   | { name: 'audit' }
   | { name: 'profile' }
+  | { name: 'opportunities' }
+  | { name: 'opportunity-new' }
+  | { name: 'opportunity'; id: string }
+  | { name: 'quotes' }
+  | { name: 'quote-new' }
+  | { name: 'quote'; id: string }
+  | { name: 'quote-edit'; id: string }
   | { name: 'not-found' }
-
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#/, '') || '/'
   const parts = path.split('/').filter(Boolean)
@@ -34,5 +40,18 @@ export function parseHash(hash: string): Route {
   if (parts[0] === 'admin' && parts[1] === 'import') return { name: 'import' }
   if (parts[0] === 'admin' && parts[1] === 'audit') return { name: 'audit' }
   if (parts[0] === 'profil') return { name: 'profile' }
+  if (parts[0] === 'opportunities') {
+    if (parts[1] === 'nouveau') return { name: 'opportunity-new' }
+    if (parts[1]) return { name: 'opportunity', id: parts[1] }
+    return { name: 'opportunities' }
+  }
+  if (parts[0] === 'quotes') {
+    if (parts[1] && parts[2] === 'modifier') {
+      return { name: 'quote-edit', id: parts[1] }
+      }
+    if (parts[1] === 'nouveau') return { name: 'quote-new' }
+    if (parts[1]) return { name: 'quote', id: parts[1] }
+    return { name: 'quotes' }
+  }
   return { name: 'not-found' }
 }
