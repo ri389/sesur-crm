@@ -9,6 +9,9 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { OpportunitiesModule } from './opportunities/opportunities.module';
 import { QuotesModule } from './quotes/quotes.module';
+import { ActivitiesModule } from './activities/activities.module';
+import { SupportModule } from './support/support.module';
+import { IntegrationsModule } from './integrations/integrations.module';
 
 @Module({
   imports: [
@@ -24,6 +27,9 @@ import { QuotesModule } from './quotes/quotes.module';
     CrmCoreModule,
     OpportunitiesModule,
     QuotesModule,
+    ActivitiesModule,
+    SupportModule,
+    IntegrationsModule,
   ],
   controllers: [HealthController],
 })

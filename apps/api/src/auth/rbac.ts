@@ -16,6 +16,11 @@ export const RESOURCES = [
   'search',
   'duplicate',
   'quote',
+  'task',
+  'calendar',
+  'ticket',
+  'contract',
+  'integration',
 ] as const;
 
 export type Resource = (typeof RESOURCES)[number];
@@ -41,7 +46,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     code: 'ADMIN',
     name: 'Administrateur',
-    description: 'Accès complet au CRM',
+    description: 'Administration des fonctionnalités disponibles du CRM',
     grants: [
       ...RESOURCES.flatMap((resource) =>
         grants(
@@ -56,7 +61,19 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
                   ? [...CRUD, 'convert']
                   : resource === 'interaction'
                     ? ['read', 'create', 'delete']
-                    : [...CRUD],
+                    : resource === 'quote'
+                      ? [...CRUD, 'approve']
+                      : resource === 'ticket'
+                        ? [...CRUD, 'escalate', 'comment']
+                        : resource === 'integration'
+                          ? ['read', 'replay']
+                          : resource === 'team'
+                            ? ['read', 'create', 'update']
+                            : resource === 'product'
+                              ? ['read', 'create', 'update']
+                              : resource === 'role'
+                                ? []
+                                : [...CRUD],
           PermissionScope.ALL,
         ),
       ),
@@ -77,6 +94,10 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       ...grants('search', ['read'], PermissionScope.ALL),
       ...grants('opportunity', ['read'], PermissionScope.ALL),
       ...grants('quote', ['read'], PermissionScope.ALL),
+      ...grants('task', ['read'], PermissionScope.ALL),
+      ...grants('calendar', ['read'], PermissionScope.ALL),
+      ...grants('ticket', ['read'], PermissionScope.ALL),
+      ...grants('contract', ['read'], PermissionScope.ALL),
     ],
   },
   {
@@ -95,7 +116,10 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       ...grants('search', ['read'], PermissionScope.ALL),
       ...grants('audit', ['read'], PermissionScope.ALL),
       ...grants('opportunity', [...CRUD], PermissionScope.ALL),
-      ...grants('quote', [...CRUD], PermissionScope.ALL),
+      ...grants('quote', [...CRUD, 'approve'], PermissionScope.ALL),
+      ...grants('task', [...CRUD], PermissionScope.ALL),
+      ...grants('calendar', [...CRUD], PermissionScope.ALL),
+      ...grants('contract', [...CRUD], PermissionScope.ALL),
     ],
   },
   {
@@ -103,14 +127,28 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     name: 'Commercial',
     description: 'Suivi des prospects et clients de l’équipe',
     grants: [
-      ...grants('lead', ['read', 'create', 'update', 'convert'], PermissionScope.TEAM),
+      ...grants(
+        'lead',
+        ['read', 'create', 'update', 'convert'],
+        PermissionScope.TEAM,
+      ),
       ...grants('contact', ['read', 'create', 'update'], PermissionScope.ALL),
-      ...grants('organization', ['read', 'create', 'update'], PermissionScope.ALL),
+      ...grants(
+        'organization',
+        ['read', 'create', 'update'],
+        PermissionScope.ALL,
+      ),
       ...grants('interaction', ['read', 'create'], PermissionScope.ALL),
       ...grants('product', ['read'], PermissionScope.ALL),
       ...grants('search', ['read'], PermissionScope.ALL),
-      ...grants('opportunity',['read', 'create', 'update'],PermissionScope.TEAM,),
+      ...grants(
+        'opportunity',
+        ['read', 'create', 'update'],
+        PermissionScope.TEAM,
+      ),
       ...grants('quote', ['read', 'create', 'update'], PermissionScope.TEAM),
+      ...grants('task', [...CRUD], PermissionScope.TEAM),
+      ...grants('calendar', [...CRUD], PermissionScope.TEAM),
     ],
   },
   {
@@ -122,6 +160,11 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       ...grants('organization', ['read'], PermissionScope.ALL),
       ...grants('interaction', ['read', 'create'], PermissionScope.ALL),
       ...grants('search', ['read'], PermissionScope.ALL),
+      ...grants(
+        'ticket',
+        ['read', 'create', 'update', 'comment'],
+        PermissionScope.TEAM,
+      ),
     ],
   },
   {
@@ -133,6 +176,11 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       ...grants('organization', ['read', 'update'], PermissionScope.ALL),
       ...grants('interaction', ['read', 'create'], PermissionScope.ALL),
       ...grants('search', ['read'], PermissionScope.ALL),
+      ...grants(
+        'ticket',
+        [...CRUD, 'escalate', 'comment'],
+        PermissionScope.ALL,
+      ),
     ],
   },
   {

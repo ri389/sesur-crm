@@ -27,18 +27,22 @@ export class OrganizationController {
   @Get()
   @RequirePermission('organization', 'read')
   async findAll(
+    @CurrentUser() user: AuthenticatedUser,
     @Query('isClient') isClient?: string,
     @Query('search') search?: string,
   ): Promise<Organization[]> {
     const isClientBool =
       isClient !== undefined ? isClient === 'true' : undefined;
-    return this.orgService.findAll({ isClient: isClientBool, search });
+    return this.orgService.findAll({ isClient: isClientBool, search }, user);
   }
 
   @Get(':id')
   @RequirePermission('organization', 'read')
-  async findById(@Param('id') id: string): Promise<Organization> {
-    return this.orgService.findById(id);
+  async findById(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<Organization> {
+    return this.orgService.findById(id, user);
   }
 
   @Post()

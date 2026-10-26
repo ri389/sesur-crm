@@ -5,12 +5,20 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Prisma, QuoteStatus } from '@prisma/client';
+import {
+  Prisma,
+  PermissionScope,
+  QuoteApprovalStatus,
+  QuoteStatus,
+} from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import type { AuthenticatedUser } from '../auth/auth.types';
+import { effectiveScope } from '../auth/rbac';
 import {
   CreateQuoteDto,
+  QuoteApprovalDecisionDto,
   QuoteItemDto,
   QuoteResponseDto,
   UpdateQuoteDto,
@@ -45,12 +53,27 @@ export class QuotesService {
     private readonly audit: AuditService,
   ) {}
 
+  private scopeWhere(
+    user: AuthenticatedUser,
+    action: string,
+  ): Prisma.QuoteWhereInput {
+    const scope = effectiveScope(user, 'quote', action);
+    if (!scope) {
+      throw new ForbiddenException('Accès refusé');
+    }
+
+    if (scope === PermissionScope.ALL) return {};
+    if (scope === PermissionScope.OWN || !user.teamId) {
+      return { createdByUserId: user.id };
+    }
+    return { createdBy: { is: { teamId: user.teamId } } };
+  }
+
   async create(
     dto: CreateQuoteDto,
     userId: string,
   ): Promise<QuoteResponseDto> {
     const quoteNumber = this.generateQuoteNumber();
-
     const quote = await this.prisma.$transaction(async (tx) => {
       await this.assertOrganizationAndContact(
         tx,
@@ -64,7 +87,7 @@ export class QuotesService {
         dto.globalDiscount ?? 0,
       );
 
-      return tx.quote.create({
+      const created = await tx.quote.create({
         data: {
           number: quoteNumber,
           status: QuoteStatus.DRAFT,
@@ -93,13 +116,14 @@ export class QuotesService {
         },
         include: { items: true },
       });
-    });
 
-    await this.audit.record({
-      action: 'quote.created',
-      entityType: 'quote',
-      entityId: quote.id,
-      actorUserId: userId,
+      await this.audit.record({
+        action: 'quote.created',
+        entityType: 'quote',
+        entityId: created.id,
+        actorUserId: userId,
+      }, tx);
+      return created;
     });
 
     return this.mapToResponse(quote);
@@ -108,11 +132,15 @@ export class QuotesService {
   async update(
     id: string,
     dto: UpdateQuoteDto,
-    userId: string,
+    user: AuthenticatedUser,
   ): Promise<QuoteResponseDto> {
     const quote = await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.quote.findUnique({
-        where: { id },
+      const existing = await tx.quote.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...this.scopeWhere(user, 'update'),
+        },
         include: { items: true },
       });
 
@@ -164,7 +192,7 @@ export class QuotesService {
         });
       }
 
-      return tx.quote.update({
+      const updated = await tx.quote.update({
         where: { id },
         data: {
           subtotal: totals.subtotal,
@@ -174,21 +202,233 @@ export class QuotesService {
         },
         include: { items: true },
       });
+
+      await this.audit.record({
+        action: 'quote.updated',
+        entityType: 'quote',
+        entityId: id,
+        actorUserId: user.id,
+      }, tx);
+      return updated;
     });
 
-    await this.audit.record({
-      action: 'quote.updated',
-      entityType: 'quote',
-      entityId: id,
-      actorUserId: userId,
+    return this.mapToResponse(quote);
+  }
+  async submitForApproval(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<QuoteResponseDto> {
+    const quote = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.quote.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...this.scopeWhere(user, 'update'),
+        },
+      });
+
+      if (!existing) {
+        throw new NotFoundException('Devis non trouvé.');
+      }
+      if (existing.status !== QuoteStatus.DRAFT) {
+        throw new BadRequestException(
+          'Seuls les devis en brouillon peuvent être soumis à approbation.',
+        );
+      }
+
+      const approvers = await tx.user.findMany({
+        where: {
+          isActive: true,
+          deletedAt: null,
+          id: { not: user.id },
+          roles: {
+            some: {
+              role: { code: { in: ['ADMIN', 'SALES_MANAGER'] } },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      if (approvers.length === 0) {
+        throw new BadRequestException(
+          'Aucun approbateur actif disponible. Vérifiez les rôles ADMIN et SALES_MANAGER.',
+        );
+      }
+
+      await tx.quoteApproval.updateMany({
+        where: { quoteId: id, status: QuoteApprovalStatus.PENDING },
+        data: {
+          status: QuoteApprovalStatus.CANCELLED,
+          decidedAt: new Date(),
+          comments: 'Demande remplacée par une nouvelle soumission.',
+        },
+      });
+      await tx.quoteApproval.createMany({
+        data: approvers.map((approver) => ({
+          quoteId: id,
+          status: QuoteApprovalStatus.PENDING,
+          requestedByUserId: user.id,
+          approverUserId: approver.id,
+        })),
+      });
+
+      const submitted = await tx.quote.update({
+        where: { id },
+        data: { status: QuoteStatus.PENDING_APPROVAL },
+        include: { items: true },
+      });
+      await this.audit.record(
+        {
+          action: 'quote.submitted_for_approval',
+          entityType: 'quote',
+          entityId: id,
+          actorUserId: user.id,
+        },
+        tx,
+      );
+      return submitted;
     });
 
     return this.mapToResponse(quote);
   }
 
-  async findOne(id: string): Promise<QuoteResponseDto> {
+  async approve(
+    id: string,
+    user: AuthenticatedUser,
+    dto: QuoteApprovalDecisionDto,
+  ): Promise<QuoteResponseDto> {
+    return this.decideApproval(
+      id,
+      user,
+      QuoteApprovalStatus.APPROVED,
+      dto.comments,
+    );
+  }
+
+  async reject(
+    id: string,
+    user: AuthenticatedUser,
+    dto: QuoteApprovalDecisionDto,
+  ): Promise<QuoteResponseDto> {
+    if (!dto.comments?.trim()) {
+      throw new BadRequestException(
+        'Un commentaire est obligatoire pour refuser un devis.',
+      );
+    }
+
+    return this.decideApproval(
+      id,
+      user,
+      QuoteApprovalStatus.REJECTED,
+      dto.comments.trim(),
+    );
+  }
+
+  private async decideApproval(
+    id: string,
+    user: AuthenticatedUser,
+    decision: 'APPROVED' | 'REJECTED',
+    comments?: string,
+  ): Promise<QuoteResponseDto> {
+    const quote = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.quote.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...this.scopeWhere(user, 'approve'),
+        },
+      });
+      if (!existing) {
+        throw new NotFoundException('Devis non trouvé.');
+      }
+      if (existing.status !== QuoteStatus.PENDING_APPROVAL) {
+        throw new BadRequestException(
+          'Ce devis ne possède aucune demande d’approbation en cours.',
+        );
+      }
+
+      const approval = await tx.quoteApproval.findFirst({
+        where: {
+          quoteId: id,
+          approverUserId: user.id,
+          status: QuoteApprovalStatus.PENDING,
+        },
+      });
+      if (!approval) {
+        throw new ForbiddenException(
+          'Vous ne disposez d’aucune demande d’approbation en attente pour ce devis.',
+        );
+      }
+
+      const nextQuoteStatus =
+        decision === QuoteApprovalStatus.APPROVED
+          ? QuoteStatus.APPROVED
+          : QuoteStatus.DRAFT;
+      const updatedQuote = await tx.quote.updateMany({
+        where: {
+          id,
+          deletedAt: null,
+          status: QuoteStatus.PENDING_APPROVAL,
+        },
+        data: { status: nextQuoteStatus },
+      });
+      if (updatedQuote.count !== 1) {
+        throw new BadRequestException(
+          'Le statut du devis a changé. Rechargez le devis avant de continuer.',
+        );
+      }
+
+      await tx.quoteApproval.update({
+        where: { id: approval.id },
+        data: {
+          status: decision,
+          decidedAt: new Date(),
+          comments: comments?.trim() || null,
+        },
+      });
+      await tx.quoteApproval.updateMany({
+        where: { quoteId: id, status: QuoteApprovalStatus.PENDING },
+        data: {
+          status: QuoteApprovalStatus.CANCELLED,
+          decidedAt: new Date(),
+          comments: 'Demande clôturée après une autre décision.',
+        },
+      });
+
+      const result = await tx.quote.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+      if (!result) throw new NotFoundException('Devis non trouvé.');
+
+      await this.audit.record(
+        {
+          action:
+            decision === QuoteApprovalStatus.APPROVED
+              ? 'quote.approved'
+              : 'quote.rejected',
+          entityType: 'quote',
+          entityId: id,
+          actorUserId: user.id,
+        },
+        tx,
+      );
+      return result;
+    });
+
+    return this.mapToResponse(quote);
+  }
+
+  async findOne(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<QuoteResponseDto> {
     const quote = await this.prisma.quote.findFirst({
-      where: { id, deletedAt: null },
+      where: {
+        id,
+        deletedAt: null,
+        ...this.scopeWhere(user, 'read'),
+      },
       include: { items: true },
     });
 
@@ -199,9 +439,9 @@ export class QuotesService {
     return this.mapToResponse(quote);
   }
 
-  async findAll(): Promise<QuoteResponseDto[]> {
+  async findAll(user: AuthenticatedUser): Promise<QuoteResponseDto[]> {
     const quotes = await this.prisma.quote.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...this.scopeWhere(user, 'read') },
       include: { items: true },
       orderBy: { createdAt: 'desc' },
     });

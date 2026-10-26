@@ -1,12 +1,14 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Lead, LeadStatus, Prisma } from '@prisma/client';
-import { AccessContext, leadScopeWhere } from '../../auth/access';
+import { Lead, LeadStatus, PermissionScope, Prisma } from '@prisma/client';
+import { leadScopeWhere } from '../../auth/access';
+import type { AccessContext } from '../../auth/access';
 import { AuditService } from '../../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DuplicateService } from '../duplicates/duplicate.service';
@@ -58,7 +60,7 @@ export class LeadService {
       orderBy: { createdAt: 'desc' },
       include: {
         assignedUser: {
-          select: { id: true, firstName: true, lastName: true, email: true },
+          select: { id: true, firstName: true, lastName: true },
         },
         organization: { select: { id: true, name: true, isClient: true } },
         contact: { select: { id: true, firstName: true, lastName: true } },
@@ -91,16 +93,61 @@ export class LeadService {
     return lead;
   }
 
-  async create(dto: CreateLeadDto, actorUserId?: string): Promise<Lead> {
+  private async assertAssigneeAssignable(
+    assignedUserId: string,
+    access?: AccessContext,
+  ): Promise<void> {
+    if (!access || access.scope === PermissionScope.ALL) return;
+
+    if (access.scope === PermissionScope.OWN) {
+      if (assignedUserId !== access.userId) {
+        throw new ForbiddenException(
+          'Vous ne pouvez attribuer un prospect qu’à vous-même.',
+        );
+      }
+      return;
+    }
+
+    if (!access.teamId) {
+      if (assignedUserId === access.userId) return;
+      throw new ForbiddenException(
+        'Sans équipe, vous ne pouvez attribuer un prospect qu’à vous-même.',
+      );
+    }
+
+    const assignee = await this.prisma.user.findFirst({
+      where: { id: assignedUserId, deletedAt: null, isActive: true },
+      select: { teamId: true },
+    });
+    if (assignee?.teamId !== access.teamId) {
+      throw new ForbiddenException(
+        'Le responsable doit appartenir à votre équipe.',
+      );
+    }
+  }
+
+  async create(
+    dto: CreateLeadDto,
+    actorUserId?: string,
+    access?: AccessContext,
+  ): Promise<Lead> {
+    const assignedUserId = dto.assignedUserId || actorUserId || null;
+    if (assignedUserId) {
+      await this.assertAssigneeAssignable(assignedUserId, access);
+    }
+
     // 1. Vérification des doublons potentiels
     if (!dto.bypassDuplicateWarning) {
-      const candidates = await this.duplicates.checkDuplicates({
-        email: dto.email,
-        phone: dto.phone,
-        companyName: dto.companyName,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-      });
+      const candidates = await this.duplicates.checkDuplicates(
+        {
+          email: dto.email,
+          phone: dto.phone,
+          companyName: dto.companyName,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+        },
+        access,
+      );
 
       if (candidates.length > 0 && candidates[0].score >= 70) {
         throw new HttpException(
@@ -115,38 +162,41 @@ export class LeadService {
     }
 
     // 2. Création du prospect
-    const lead = await this.prisma.lead.create({
-      data: {
-        firstName: dto.firstName.trim(),
-        lastName: dto.lastName.trim(),
-        companyName: dto.companyName?.trim() || null,
-        email: dto.email?.trim().toLowerCase() || null,
-        phone: dto.phone?.trim() || null,
-        source: dto.source || 'AUTRE',
-        status: LeadStatus.NEW,
-        score: dto.score ?? 0,
-        assignedUserId: dto.assignedUserId || actorUserId || null,
-      },
-      include: {
-        assignedUser: {
-          select: { id: true, firstName: true, lastName: true, email: true },
+    return this.prisma.$transaction(async (tx) => {
+      const lead = await tx.lead.create({
+        data: {
+          firstName: dto.firstName.trim(),
+          lastName: dto.lastName.trim(),
+          companyName: dto.companyName?.trim() || null,
+          email: dto.email?.trim().toLowerCase() || null,
+          phone: dto.phone?.trim() || null,
+          source: dto.source || 'AUTRE',
+          status: LeadStatus.NEW,
+          score: dto.score ?? 0,
+          assignedUserId,
         },
-      },
-    });
+        include: {
+          assignedUser: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+        },
+      });
 
-    // 3. Journalisation d'audit
-    await this.audit.record({
-      action: 'lead.created',
-      entityType: 'lead',
-      entityId: lead.id,
-      actorUserId: actorUserId ?? null,
-      metadata: {
-        source: lead.source,
-        bypassedDuplicates: Boolean(dto.bypassDuplicateWarning),
-      },
+      await this.audit.record(
+        {
+          action: 'lead.created',
+          entityType: 'lead',
+          entityId: lead.id,
+          actorUserId: actorUserId ?? null,
+          metadata: {
+            source: lead.source,
+            bypassedDuplicates: Boolean(dto.bypassDuplicateWarning),
+          },
+        },
+        tx,
+      );
+      return lead;
     });
-
-    return lead;
   }
 
   async update(
@@ -155,44 +205,60 @@ export class LeadService {
     actorUserId?: string,
     access?: AccessContext,
   ): Promise<Lead> {
-    await this.findById(id, access);
+    if (dto.assignedUserId) {
+      await this.assertAssigneeAssignable(dto.assignedUserId, access);
+    }
 
-    const updated = await this.prisma.lead.update({
-      where: { id },
-      data: {
-        ...(dto.firstName !== undefined
-          ? { firstName: dto.firstName.trim() }
-          : {}),
-        ...(dto.lastName !== undefined
-          ? { lastName: dto.lastName.trim() }
-          : {}),
-        ...(dto.companyName !== undefined
-          ? { companyName: dto.companyName?.trim() || null }
-          : {}),
-        ...(dto.email !== undefined
-          ? { email: dto.email?.trim().toLowerCase() || null }
-          : {}),
-        ...(dto.phone !== undefined
-          ? { phone: dto.phone?.trim() || null }
-          : {}),
-        ...(dto.source !== undefined ? { source: dto.source } : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.score !== undefined ? { score: dto.score } : {}),
-        ...(dto.assignedUserId !== undefined
-          ? { assignedUserId: dto.assignedUserId }
-          : {}),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.lead.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(access ? leadScopeWhere(access) : {}),
+        },
+        select: { id: true },
+      });
+      if (!existing) {
+        throw new NotFoundException(`Prospect introuvable (ID: ${id})`);
+      }
+
+      const updated = await tx.lead.update({
+        where: { id },
+        data: {
+          ...(dto.firstName !== undefined
+            ? { firstName: dto.firstName.trim() }
+            : {}),
+          ...(dto.lastName !== undefined
+            ? { lastName: dto.lastName.trim() }
+            : {}),
+          ...(dto.companyName !== undefined
+            ? { companyName: dto.companyName?.trim() || null }
+            : {}),
+          ...(dto.email !== undefined
+            ? { email: dto.email?.trim().toLowerCase() || null }
+            : {}),
+          ...(dto.phone !== undefined
+            ? { phone: dto.phone?.trim() || null }
+            : {}),
+          ...(dto.source !== undefined ? { source: dto.source } : {}),
+          ...(dto.status !== undefined ? { status: dto.status } : {}),
+          ...(dto.score !== undefined ? { score: dto.score } : {}),
+          ...(dto.assignedUserId !== undefined
+            ? { assignedUserId: dto.assignedUserId }
+            : {}),
+        },
+      });
+
+      await this.audit.record({
+        action: 'lead.updated',
+        entityType: 'lead',
+        entityId: id,
+        actorUserId: actorUserId ?? null,
+        metadata: { changedFields: Object.keys(dto) },
+      }, tx);
+
+      return updated;
     });
-
-    await this.audit.record({
-      action: 'lead.updated',
-      entityType: 'lead',
-      entityId: id,
-      actorUserId: actorUserId ?? null,
-      metadata: { changes: { ...dto } },
-    });
-
-    return updated;
   }
 
   async delete(
@@ -200,18 +266,26 @@ export class LeadService {
     actorUserId?: string,
     access?: AccessContext,
   ): Promise<void> {
-    await this.findById(id, access);
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.lead.findFirst({
+        where: { id, deletedAt: null, ...(access ? leadScopeWhere(access) : {}) },
+        select: { id: true },
+      });
+      if (!existing) throw new NotFoundException(`Prospect introuvable (ID: ${id})`);
 
-    await this.prisma.lead.update({
-      where: { id },
-      data: { deletedAt: new Date() },
-    });
-
-    await this.audit.record({
-      action: 'lead.deleted',
-      entityType: 'lead',
-      entityId: id,
-      actorUserId: actorUserId ?? null,
+      await tx.lead.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await this.audit.record(
+        {
+          action: 'lead.deleted',
+          entityType: 'lead',
+          entityId: id,
+          actorUserId: actorUserId ?? null,
+        },
+        tx,
+      );
     });
   }
 

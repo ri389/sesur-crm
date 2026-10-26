@@ -1,4 +1,3 @@
-
 import {
   Body,
   Controller,
@@ -12,7 +11,11 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
-import { CreateQuoteDto, UpdateQuoteDto } from './dto/quote.dto';
+import {
+  CreateQuoteDto,
+  QuoteApprovalDecisionDto,
+  UpdateQuoteDto,
+} from './dto/quote.dto';
 import { QuotesService } from './quotes.service';
 
 @Controller('quotes')
@@ -30,14 +33,17 @@ export class QuotesController {
 
   @Get()
   @RequirePermission('quote', 'read')
-  findAll() {
-    return this.quotesService.findAll();
+  findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.quotesService.findAll(user);
   }
 
   @Get(':id')
   @RequirePermission('quote', 'read')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.quotesService.findOne(id);
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.quotesService.findOne(id, user);
   }
 
   @Patch(':id')
@@ -47,6 +53,35 @@ export class QuotesController {
     @Body() dto: UpdateQuoteDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.quotesService.update(id, dto, user.id);
+    return this.quotesService.update(id, dto, user);
+  }
+
+  @Post(':id/submit-for-approval')
+  @RequirePermission('quote', 'update')
+  submitForApproval(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.quotesService.submitForApproval(id, user);
+  }
+
+  @Post(':id/approve')
+  @RequirePermission('quote', 'approve')
+  approve(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: QuoteApprovalDecisionDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.quotesService.approve(id, user, dto);
+  }
+
+  @Post(':id/reject')
+  @RequirePermission('quote', 'approve')
+  reject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: QuoteApprovalDecisionDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.quotesService.reject(id, user, dto);
   }
 }

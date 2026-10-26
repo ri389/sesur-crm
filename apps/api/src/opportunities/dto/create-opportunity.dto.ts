@@ -20,6 +20,7 @@ export class CreateOpportunityDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
   @Matches(/^\d+(\.\d{1,2})?$/)
   amount?: string;
 

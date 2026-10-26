@@ -17,7 +17,14 @@ export interface AuditEntry {
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(entry: AuditEntry): Promise<void> {
+  async record(
+    entry: AuditEntry,
+    transaction?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (transaction) {
+      await transaction.auditLog.create({ data: entry });
+      return;
+    }
     await this.prisma.auditLog.create({ data: entry });
   }
 

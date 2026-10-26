@@ -207,26 +207,18 @@ export class OpportunitiesService {
           }
         : {}),
     };
+    const include: Prisma.OpportunityInclude = {};
+    if (effectiveScope(user, 'organization', 'read')) {
+      include.organization = { select: { id: true, name: true } };
+    }
+    if (effectiveScope(user, 'contact', 'read')) {
+      include.contact = { select: { id: true, firstName: true, lastName: true } };
+    }
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.opportunity.findMany({
         where,
-        include: {
-          owner: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              teamId: true,
-            },
-          },
-          organization: {
-            select: { id: true, name: true },
-          },
-          contact: {
-            select: { id: true, firstName: true, lastName: true },
-          },
-        },
+        include,
         orderBy: { updatedAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -246,44 +238,28 @@ export class OpportunitiesService {
   }
 
   async findOne(id: string, user: AuthenticatedUser) {
-  const scope = this.requireScope(user, 'read');
+    const scope = this.requireScope(user, 'read');
+    const include: Prisma.OpportunityInclude = {};
+    if (effectiveScope(user, 'organization', 'read')) {
+      include.organization = { select: { id: true, name: true } };
+    }
+    if (effectiveScope(user, 'contact', 'read')) {
+      include.contact = { select: { id: true, firstName: true, lastName: true } };
+    }
 
-  const opportunity = await this.prisma.opportunity.findFirst({
-    where: {
-      id,
-      deletedAt: null,
-      ...this.scopeWhere(user, scope),
-    },
-    include: {
-      owner: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          teamId: true,
-        },
+    const opportunity = await this.prisma.opportunity.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...this.scopeWhere(user, scope),
       },
-      createdBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      lead: true,
-      organization: true,
-      contact: true,
-      quotes: { where: { deletedAt: null } },
-      tasks: { where: { deletedAt: null } },
-      calendarEvents: { where: { deletedAt: null } },
-    },
-  });
+      // Related leads, quotes, tasks and events need their own checks and
+      // were not used by the opportunity detail page. Do not return them here.
+      include,
+    });
 
-  if (!opportunity) {
-    throw new NotFoundException('Opportunité introuvable');
-  }
-
-  return opportunity;
+    if (!opportunity) throw new NotFoundException('Opportunité introuvable');
+    return opportunity;
 }
 
   async update(

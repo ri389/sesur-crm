@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { PermissionScope, Prisma } from '@prisma/client';
+import { accessFor, leadScopeWhere } from '../../auth/access';
 import { effectiveScope } from '../../auth/rbac';
 import type { AuthenticatedUser } from '../../auth/auth.types';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface SearchHit {
-  type: 'LEAD' | 'CONTACT' | 'ORGANIZATION' | 'PRODUCT';
+  type: 'LEAD' | 'CONTACT' | 'ORGANIZATION' | 'PRODUCT' | 'OPPORTUNITY';
   id: string;
   title: string;
   subtitle?: string | null;
@@ -19,18 +21,30 @@ export class SearchService {
     if (q.length < 2) return [];
 
     const can = (resource: string) => Boolean(effectiveScope(user, resource, 'read'));
+    const leadAccess = can('lead') ? accessFor(user, 'lead', 'read') : undefined;
+    const opportunityScope = effectiveScope(user, 'opportunity', 'read');
+    const opportunityWhere: Prisma.OpportunityWhereInput = opportunityScope === PermissionScope.ALL
+      ? {}
+      : opportunityScope === PermissionScope.TEAM && user.teamId
+        ? { OR: [{ ownerUserId: user.id }, { owner: { is: { teamId: user.teamId } } }] }
+        : { ownerUserId: user.id };
 
-    const [leads, contacts, organizations, products] = await Promise.all([
+    const [leads, contacts, organizations, products, opportunities] = await Promise.all([
       can('lead')
         ? this.prisma.lead.findMany({
             where: {
               deletedAt: null,
-              OR: [
-                { firstName: { contains: q, mode: 'insensitive' } },
-                { lastName: { contains: q, mode: 'insensitive' } },
-                { companyName: { contains: q, mode: 'insensitive' } },
-                { email: { contains: q, mode: 'insensitive' } },
-                { phone: { contains: q } },
+              AND: [
+                ...(leadAccess ? [leadScopeWhere(leadAccess)] : []),
+                {
+                  OR: [
+                    { firstName: { contains: q, mode: 'insensitive' } },
+                    { lastName: { contains: q, mode: 'insensitive' } },
+                    { companyName: { contains: q, mode: 'insensitive' } },
+                    { email: { contains: q, mode: 'insensitive' } },
+                    { phone: { contains: q } },
+                  ],
+                },
               ],
             },
             take: 8,
@@ -76,6 +90,26 @@ export class SearchService {
             take: 8,
           })
         : Promise.resolve([]),
+      opportunityScope
+        ? this.prisma.opportunity.findMany({
+            where: {
+              deletedAt: null,
+              AND: [
+                opportunityWhere,
+                {
+                  OR: [
+                    { name: { contains: q, mode: 'insensitive' } },
+                    { description: { contains: q, mode: 'insensitive' } },
+                    { organization: { is: { name: { contains: q, mode: 'insensitive' } } } },
+                  ],
+                },
+              ],
+            },
+            take: 8,
+            orderBy: { updatedAt: 'desc' },
+            include: { organization: { select: { name: true } } },
+          })
+        : Promise.resolve([]),
     ]);
 
     return [
@@ -102,6 +136,12 @@ export class SearchService {
         id: product.id,
         title: product.name,
         subtitle: product.sku,
+      })),
+      ...opportunities.map((opportunity) => ({
+        type: 'OPPORTUNITY' as const,
+        id: opportunity.id,
+        title: opportunity.name,
+        subtitle: opportunity.organization?.name,
       })),
     ];
   }

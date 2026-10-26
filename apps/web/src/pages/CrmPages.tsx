@@ -1,8 +1,11 @@
-import { FormEvent, useEffect, useState } from 'react'
+import {useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
 import {
   api,
   ApiError,
   can,
+  type Opportunity,
+  type OpportunityListResponse,
   candidatesOf,
   type Contact,
   type DuplicateCandidate,
@@ -11,6 +14,7 @@ import {
   type Organization,
   type User,
 } from '../api'
+import { MetricCards } from '../components/MetricCards'
 
 const LEAD_LABEL: Record<Lead['status'], string> = {
   NEW: 'Nouveau',
@@ -72,46 +76,157 @@ function DuplicateList({
 export function HomePage({ user }: { user: User }) {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<Array<{ type: string; id: string; title: string; subtitle?: string | null }>>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [metrics, setMetrics] = useState<{ leads: number | null; clients: number | null; opportunities: number | null; quotes: number | null }>({
+    leads: null,
+    clients: null,
+    opportunities: null,
+    quotes: null,
+  })
+  const [metricsLoading, setMetricsLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    setMetricsLoading(true)
+    const count = <T,>(request: Promise<T>, select: (value: T) => number) => request.then(select).catch(() => null)
+
+    void Promise.all([
+      can(user, 'lead', 'read') ? count(api.leads.list(), (rows) => rows.length) : Promise.resolve(null),
+      can(user, 'organization', 'read') ? count(api.organizations.list(true), (rows) => rows.length) : Promise.resolve(null),
+      can(user, 'opportunity', 'read') ? count(api.opportunities.list(1, 1), (result) => result.pagination.total) : Promise.resolve(null),
+      can(user, 'quote', 'read') ? count(api.quotes.list(), (rows) => rows.length) : Promise.resolve(null),
+    ]).then(([leads, clients, opportunities, quotes]) => {
+      if (active) setMetrics({ leads, clients, opportunities, quotes })
+    }).finally(() => {
+      if (active) setMetricsLoading(false)
+    })
+
+    return () => { active = false }
+  }, [user])
 
   useEffect(() => {
     if (query.trim().length < 2 || !can(user, 'search', 'read')) {
       setHits([])
+      setSearchLoading(false)
+      setSearchError('')
       return
     }
+    let active = true
+    setSearchLoading(true)
+    setSearchError('')
     const handle = window.setTimeout(() => {
-      void api.search(query).then((res) => setHits(res.results))
+      void api.search(query)
+        .then((res) => { if (active) setHits(res.results) })
+        .catch((err: unknown) => {
+          if (!active) return
+          setHits([])
+          setSearchError(err instanceof ApiError ? err.message : 'La recherche est temporairement indisponible.')
+        })
+        .finally(() => { if (active) setSearchLoading(false) })
     }, 250)
-    return () => window.clearTimeout(handle)
+    return () => { active = false; window.clearTimeout(handle) }
   }, [query, user])
 
   const hrefFor = (type: string, id: string) => {
     if (type === 'LEAD') return `#/leads/${id}`
     if (type === 'CONTACT') return `#/contacts/${id}`
     if (type === 'ORGANIZATION') return `#/clients/${id}`
+    if (type === 'OPPORTUNITY') return `#/opportunities/${id}`
     return '#/admin/produits'
   }
 
+  const metricCards = [
+    ...(can(user, 'lead', 'read') ? [{ label: 'Prospects', value: metrics.leads, detail: 'dans votre périmètre', href: '#/leads', tone: 'mint' }] : []),
+    ...(can(user, 'organization', 'read') ? [{ label: 'Clients', value: metrics.clients, detail: 'organisations suivies', href: '#/clients', tone: 'blue' }] : []),
+    ...(can(user, 'opportunity', 'read') ? [{ label: 'Opportunités', value: metrics.opportunities, detail: 'dans le pipeline', href: '#/opportunities', tone: 'violet' }] : []),
+    ...(can(user, 'quote', 'read') ? [{ label: 'Devis', value: metrics.quotes, detail: 'tous statuts', href: '#/quotes', tone: 'amber' }] : []),
+  ]
+
+  const shortcuts = [
+    ...(can(user, 'lead', 'read') ? [{ label: 'Prospects', detail: 'Suivre la qualification', href: '#/leads', icon: '↗' }] : []),
+    ...(can(user, 'opportunity', 'read') ? [{ label: 'Pipeline commercial', detail: 'Voir les opportunités', href: '#/opportunities', icon: '⌁' }] : []),
+    ...(can(user, 'task', 'read') ? [{ label: 'Tâches', detail: 'Organiser les prochaines actions', href: '#/taches', icon: '✓' }] : []),
+    ...(can(user, 'ticket', 'read') ? [{ label: 'Support client', detail: 'Consulter les demandes', href: '#/sav/tickets', icon: '◌' }] : []),
+  ]
+
   return (
-    <>
-      <h2>Mes priorités</h2>
-      <p>Recherchez un prospect, un client, un contact ou un produit.</p>
-      {can(user, 'search', 'read') && (
-        <label className="stack">
-          Recherche globale
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nom, e-mail, entreprise…" />
-        </label>
+    <div className="dashboard">
+      <section className="dashboard-hero" aria-labelledby="dashboard-title">
+        <div className="dashboard-hero-copy">
+          <span className="eyebrow">Pilotage commercial · SESUR</span>
+          <h2 id="dashboard-title">Bonjour, {user.firstName}.</h2>
+          <p>Votre activité, vos relations et les prochaines décisions au même endroit.</p>
+        </div>
+        <div className="hero-mark" aria-hidden="true"><span /><span /><span /><span /></div>
+        <div className="hero-meta"><span className="live-indicator" /> Données de votre espace sécurisé</div>
+      </section>
+
+      {metricCards.length > 0 && (
+        <section className="dashboard-metrics" aria-label="Indicateurs clés">
+          {metricsLoading
+            ? metricCards.map((metric) => <div className="metric-card metric-skeleton" key={metric.label} aria-hidden="true"><span /><strong /><small /></div>)
+            : metricCards.map((metric) => (
+              <a className={`metric-card metric-${metric.tone}`} href={metric.href} key={metric.label}>
+                <span className="metric-label">{metric.label}</span>
+                <strong className="metric-value">{metric.value ?? '—'}</strong>
+                <small>{metric.value === null ? 'indisponible' : metric.detail}</small>
+                <span className="metric-arrow" aria-hidden="true">↗</span>
+              </a>
+            ))}
+        </section>
       )}
-      <ul className="plain">
-        {hits.map((hit) => (
-          <li key={`${hit.type}-${hit.id}`}>
-            <a href={hrefFor(hit.type, hit.id)}>
-              {hit.title}
-              {hit.subtitle ? ` — ${hit.subtitle}` : ''} ({hit.type})
-            </a>
-          </li>
-        ))}
-      </ul>
-    </>
+
+      <div className="dashboard-grid">
+        {can(user, 'search', 'read') && (
+          <section className="dashboard-panel search-panel" aria-labelledby="global-search-title">
+            <div className="panel-heading">
+              <div><span className="eyebrow">Recherche unifiée</span><h3 id="global-search-title">Retrouvez une information</h3></div>
+              <span className="panel-icon" aria-hidden="true">⌕</span>
+            </div>
+            <label className="global-search">
+              <span className="sr-only">Rechercher un prospect, client, contact, opportunité ou produit</span>
+              <span aria-hidden="true">⌕</span>
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nom, e-mail, entreprise…" />
+              <span className="search-scope">SESUR</span>
+            </label>
+            {hits.length > 0 && (
+              <div className="search-results" role="list" aria-label="Résultats de recherche">
+                {hits.map((hit) => (
+                  <a className="search-result" href={hrefFor(hit.type, hit.id)} key={`${hit.type}-${hit.id}`} role="listitem">
+                    <span className="result-mark">{hit.type.charAt(0)}</span>
+                    <span><strong>{hit.title}</strong><small>{hit.subtitle ?? hit.type}</small></span>
+                    <span className="result-arrow" aria-hidden="true">↗</span>
+                  </a>
+                ))}
+              </div>
+            )}
+            {searchError && <p className="form-error" role="alert">{searchError}</p>}
+            {searchLoading && <p className="search-hint" role="status">Recherche en cours…</p>}
+            {!searchError && !searchLoading && query.trim().length >= 2 && hits.length === 0 && <p className="search-empty">Aucun résultat pour le moment.</p>}
+            {query.trim().length < 2 && <p className="search-hint">Prospects, clients, contacts, opportunités et produits indexés.</p>}
+          </section>
+        )}
+
+        <section className="dashboard-panel shortcuts-panel" aria-labelledby="shortcuts-title">
+          <div className="panel-heading">
+            <div><span className="eyebrow">Accès rapide</span><h3 id="shortcuts-title">Vos espaces de travail</h3></div>
+            <span className="panel-icon" aria-hidden="true">✳</span>
+          </div>
+          {shortcuts.length > 0 ? (
+            <div className="shortcut-list">
+              {shortcuts.map((shortcut) => (
+                <a href={shortcut.href} className="shortcut-card" key={shortcut.label}>
+                  <span className="shortcut-icon" aria-hidden="true">{shortcut.icon}</span>
+                  <span><strong>{shortcut.label}</strong><small>{shortcut.detail}</small></span>
+                  <span className="result-arrow" aria-hidden="true">↗</span>
+                </a>
+              ))}
+            </div>
+          ) : <p className="empty-state">Aucun espace supplémentaire n’est disponible avec votre rôle.</p>}
+        </section>
+      </div>
+    </div>
   )
 }
 
@@ -136,6 +251,12 @@ export function LeadsPage({ user }: { user: User }) {
         {can(user, 'lead', 'create') && <a className="button" href="#/leads/nouveau">+ Nouveau prospect</a>}
       </header>
       <ErrorText error={error} />
+      <MetricCards items={[
+        { label: 'Prospects affichés', value: leads.length, detail: 'selon le filtre courant', tone: 'blue' },
+        { label: 'À qualifier', value: leads.filter((lead) => lead.status === 'NEW').length, detail: 'nouveaux dans la file', tone: 'mint' },
+        { label: 'Qualifiés', value: leads.filter((lead) => lead.status === 'QUALIFIED').length, detail: 'prêts à convertir', tone: 'violet' },
+        { label: 'Convertis', value: leads.filter((lead) => lead.status === 'CONVERTED').length, detail: 'dans le périmètre chargé', tone: 'amber' },
+      ]} />
       <div className="filters">
         <input
           className="filter"
@@ -190,6 +311,7 @@ export function LeadFormPage({ user }: { user: User }) {
       email: String(form.get('email') ?? '') || undefined,
       phone: String(form.get('phone') ?? '') || undefined,
       source: String(form.get('source') ?? 'AUTRE'),
+      ...(bypass ? { bypassDuplicateWarning: true } : {}),
     }
     setError(null)
     try {
@@ -204,6 +326,10 @@ export function LeadFormPage({ user }: { user: User }) {
         setError(err)
       }
     }
+  }
+
+  if (!can(user, 'lead', 'create')) {
+    return <p role="alert">Vous n'avez pas la permission de créer un prospect.</p>
   }
 
   return (
@@ -262,9 +388,15 @@ export function LeadFormPage({ user }: { user: User }) {
             <button 
               type="button" 
               className="btn-warning" 
-              onClick={() => void api.leads.create({ ...pending, bypassDuplicateWarning: true } as any).then((lead) => {
-                window.location.hash = `#/leads/${lead.id}`
-              })}
+              onClick={() => {
+                setError(null)
+                void api.leads
+                  .create({ ...pending, bypassDuplicateWarning: true })
+                  .then((lead) => {
+                    window.location.hash = `#/leads/${lead.id}`
+                  })
+                  .catch((err: unknown) => setError(err))
+              }}
             >
               Créer malgré les doublons
             </button>
@@ -398,6 +530,12 @@ export function ClientsPage({ user }: { user: User }) {
           </a>
         )}
       </header>
+      <MetricCards items={[
+        { label: 'Résultats affichés', value: rows.length, detail: 'organisations visibles', tone: 'blue' },
+        { label: 'Clients', value: rows.filter((row) => row.isClient).length, detail: 'dans les résultats', tone: 'mint' },
+        { label: 'Prospects', value: rows.filter((row) => !row.isClient).length, detail: 'dans les résultats', tone: 'violet' },
+        { label: 'Contacts liés', value: rows.reduce((total, row) => total + (row._count?.contacts ?? 0), 0), detail: 'contacts associés', tone: 'amber' },
+      ]} />
       <div className="filters">
         <input
           className="filter"
@@ -544,6 +682,12 @@ export function ContactsPage({ user }: { user: User }) {
         <h2>Contacts</h2>
         {can(user, 'contact', 'create') && <a className="button" href="#/contacts/nouveau">Nouveau contact</a>}
       </header>
+      <MetricCards items={[
+        { label: 'Contacts affichés', value: rows.length, detail: 'selon la recherche', tone: 'blue' },
+        { label: 'Avec e-mail', value: rows.filter((row) => Boolean(row.email)).length, detail: 'contacts joignables', tone: 'mint' },
+        { label: 'Avec téléphone', value: rows.filter((row) => Boolean(row.phone)).length, detail: 'numéros renseignés', tone: 'violet' },
+        { label: 'Rattachés', value: rows.filter((row) => Boolean(row.organizationId)).length, detail: 'à une organisation', tone: 'amber' },
+      ]} />
       <div className="filters">
         <input
           className="filter"
@@ -711,22 +855,19 @@ export function OpportunitiesPage({ user }: { user: User }) {
   const [loading, setLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState<OpportunityListResponse['pagination'] | null>(null)
 
   useEffect(() => {
     let active = true
     setLoading(true)
     setError(null)
 
-    api.opportunities.list()
+    api.opportunities.list(page)
       .then((res) => {
         if (!active) return
-        const payload: unknown = res
-        const data = Array.isArray(payload)
-          ? payload
-          : payload && typeof payload === 'object' && 'results' in payload && Array.isArray(payload.results)
-            ? payload.results
-            : []
-        setOpportunities(data as Opportunity[])
+        setOpportunities(res.data)
+        setPagination(res.pagination)
       })
       .catch((err) => {
         if (active) setError(err)
@@ -736,13 +877,23 @@ export function OpportunitiesPage({ user }: { user: User }) {
       })
 
     return () => { active = false }
-  }, [refreshKey])
+  }, [page, refreshKey])
 
   async function updateStage(id: string, stage: Opportunity['stage']) {
     setError(null)
     setUpdatingId(id)
     try {
-      await api.opportunities.updateStage(id, { stage })
+      let lostReason: string | undefined
+      if (stage === 'LOST') {
+        const answer = window.prompt('Indiquez le motif de perte de cette opportunité :')
+        if (answer === null) return
+        lostReason = answer.trim()
+        if (!lostReason) {
+          setError(new Error('Le motif de perte est obligatoire.'))
+          return
+        }
+      }
+      await api.opportunities.updateStage(id, { stage, ...(lostReason ? { lostReason } : {}) })
       setRefreshKey((value) => value + 1)
     } catch (err) {
       setError(err)
@@ -772,9 +923,9 @@ export function OpportunitiesPage({ user }: { user: User }) {
       <ErrorText error={error} />
 
       <div className="stats-grid">
-        <section className="stat-card"><span>Opportunités actives</span><strong>{activeCount}</strong></section>
-        <section className="stat-card"><span>Valeur totale</span><strong>{opportunityAmount(totalAmount)}</strong></section>
-        <section className="stat-card"><span>Valeur pondérée</span><strong>{opportunityAmount(weightedAmount)}</strong></section>
+        <section className="stat-card"><span>Opportunités actives (page)</span><strong>{activeCount}</strong></section>
+        <section className="stat-card"><span>Valeur totale (page)</span><strong>{opportunityAmount(totalAmount)}</strong></section>
+        <section className="stat-card"><span>Valeur pondérée (page)</span><strong>{opportunityAmount(weightedAmount)}</strong></section>
       </div>
 
       {opportunities.length === 0 ? (
@@ -832,6 +983,28 @@ export function OpportunitiesPage({ user }: { user: User }) {
           })}
         </div>
       )}
+
+      {pagination && pagination.totalPages > 1 && (
+        <nav className="actions" aria-label="Pagination des opportunités">
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            Précédent
+          </button>
+          <span>
+            Page {pagination.page} sur {pagination.totalPages} ({pagination.total} opportunités)
+          </span>
+          <button
+            type="button"
+            disabled={page >= pagination.totalPages}
+            onClick={() => setPage((current) => Math.min(pagination.totalPages, current + 1))}
+          >
+            Suivant
+          </button>
+        </nav>
+      )}
     </>
   )
 }
@@ -855,17 +1028,22 @@ export function OpportunityFormPage({ user }: { user: User }) {
     event.preventDefault()
     if (saving) return
     const form = new FormData(event.currentTarget)
-    const amount = String(form.get('amount') ?? '').trim()
-    const expectedCloseDate = String(form.get('expectedCloseDate') ?? '').trim()
-    const organizationId = String(form.get('organizationId') ?? '').trim()
+    const amountValue = String(form.get('amount') ?? '').trim()
+const expectedCloseDate = String(form.get('expectedCloseDate') ?? '').trim()
+const organizationId = String(form.get('organizationId') ?? '').trim()
 
-    const body: CreateOpportunityDto = {
-      name: String(form.get('name') ?? '').trim(),
-      amount: amount || undefined,
-      probability: Number(form.get('probability')),
-      expectedCloseDate: expectedCloseDate || undefined,
-      organizationId: organizationId || undefined,
-    }
+if (!amountValue || !expectedCloseDate || !organizationId) {
+  setError(new Error('Le montant, la date de clôture et l’organisation sont obligatoires.'))
+  return
+}
+
+const body: CreateOpportunityDto = {
+  name: String(form.get('name') ?? '').trim(),
+  amount: amountValue,
+  probability: Number(form.get('probability')),
+  expectedCloseDate,
+  organizationId,
+}
 
     setError(null)
     setSaving(true)
@@ -955,6 +1133,7 @@ export function OpportunityDetailPage({ id, user }: { id: string; user: User }) 
           <p><strong>Montant :</strong> {opportunityAmount(opp.amount)}</p>
           <p><strong>Probabilité :</strong> {Number(opp.probability) || 0}%</p>
           <p><strong>Date de clôture prévue :</strong> {opportunityDate(opp.expectedCloseDate)}</p>
+          {opp.stage === 'LOST' && opp.lostReason && <p><strong>Motif de perte :</strong> {opp.lostReason}</p>}
           {opp.description && <p><strong>Description :</strong> {opp.description}</p>}
         </div>
         <div className="detail-section">
@@ -966,7 +1145,22 @@ export function OpportunityDetailPage({ id, user }: { id: string; user: User }) 
                 value={opp.stage}
                 onChange={(event) => {
                   const stage = event.target.value as Opportunity['stage']
-                  void api.opportunities.updateStage(opp.id, { stage })
+                  let lostReason: string | undefined
+                  if (stage === 'LOST') {
+                    const answer = window.prompt('Indiquez le motif de perte de cette opportunité :')
+                    if (answer === null) {
+                      event.currentTarget.value = opp.stage
+                      return
+                    }
+                    lostReason = answer.trim()
+                    if (!lostReason) {
+                      setError(new Error('Le motif de perte est obligatoire.'))
+                      event.currentTarget.value = opp.stage
+                      return
+                    }
+                  }
+                  setError(null)
+                  void api.opportunities.updateStage(opp.id, { stage, ...(lostReason ? { lostReason } : {}) })
                     .then(() => api.opportunities.get(id).then(setOpp))
                     .catch(setError)
                 }}

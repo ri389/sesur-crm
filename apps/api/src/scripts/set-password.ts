@@ -51,6 +51,7 @@ Options :
   --first-name      Prénom (obligatoire pour un nouvel utilisateur)
   --last-name       Nom (obligatoire pour un nouvel utilisateur)
   --role            Code du rôle à assigner (ex: ADMIN, SALES_REP)
+                    Par défaut, ADMIN est attribué si aucun administrateur actif n'existe.
 `);
     return;
   }
@@ -61,10 +62,41 @@ Options :
   const prisma = new PrismaClient();
   const passwords = new PasswordService();
   try {
+    await seedRbac(prisma);
+
     const existing = await prisma.user.findUnique({ where: { email } });
     if (!existing && (!values['first-name'] || !values['last-name'])) {
       throw new Error(
         'Nouvel utilisateur : --first-name et --last-name sont obligatoires',
+      );
+    }
+
+    const activeAdmin = await prisma.user.findFirst({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        roles: { some: { role: { code: 'ADMIN' } } },
+      },
+      select: { id: true },
+    });
+    const roleCode = values.role?.trim().toUpperCase() ??
+      (!activeAdmin ? 'ADMIN' : undefined);
+    if (!activeAdmin && roleCode !== 'ADMIN') {
+      throw new Error(
+        'Aucun administrateur actif : le premier rôle doit être ADMIN.',
+      );
+    }
+    if (!existing && !roleCode) {
+      throw new Error(
+        'Pour créer un utilisateur, indiquez --role <code_role>.',
+      );
+    }
+    const role = roleCode
+      ? await prisma.role.findUnique({ where: { code: roleCode } })
+      : null;
+    if (roleCode && !role) {
+      throw new Error(
+        `Rôle inconnu : ${roleCode}. Vérifiez les définitions RBAC.`,
       );
     }
 
@@ -82,74 +114,60 @@ Options :
     const passwordHash = await passwords.hash(password);
 
     if (existing) {
-      await prisma.$transaction([
-        prisma.user.update({
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
           where: { id: existing.id },
           data: { passwordHash, failedLoginCount: 0, lockedUntil: null },
-        }),
-        prisma.session.updateMany({
+        });
+        await tx.session.updateMany({
           where: { userId: existing.id, revokedAt: null },
           data: { revokedAt: new Date() },
-        }),
-        prisma.auditLog.create({
+        });
+        if (role) {
+          await tx.userRole.upsert({
+            where: {
+              userId_roleId: { userId: existing.id, roleId: role.id },
+            },
+            create: { userId: existing.id, roleId: role.id },
+            update: {},
+          });
+        }
+        await tx.auditLog.create({
           data: {
             action: 'auth.password.set',
             entityType: 'user',
             entityId: existing.id,
             metadata: { via: 'cli' },
           },
-        }),
-      ]);
+        });
+      });
       console.log(
         `Mot de passe mis à jour pour ${email} (sessions révoquées).`,
       );
     } else {
-      const user = await prisma.user.create({
-        data: {
-          email,
-          firstName: values['first-name']!,
-          lastName: values['last-name']!,
-          passwordHash,
-        },
-      });
-      await prisma.auditLog.create({
-        data: {
-          action: 'user.created',
-          entityType: 'user',
-          entityId: user.id,
-          metadata: { via: 'cli' },
-        },
+      await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            email,
+            firstName: values['first-name']!,
+            lastName: values['last-name']!,
+            passwordHash,
+            roles: role ? { create: { roleId: role.id } } : undefined,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            action: 'user.created',
+            entityType: 'user',
+            entityId: user.id,
+            metadata: { via: 'cli' },
+          },
+        });
       });
       console.log(`Utilisateur ${email} créé.`);
     }
 
-    if (values.role) {
-      await seedRbac(prisma);
-      const roleCode = values.role.trim().toUpperCase();
-      const targetUserId = existing
-        ? existing.id
-        : (await prisma.user.findUniqueOrThrow({ where: { email } })).id;
-      const role = await prisma.role.findUnique({ where: { code: roleCode } });
-      if (!role) {
-        throw new Error(
-          `Rôle inconnu : ${roleCode}. Lancez pnpm --filter api db:seed`,
-        );
-      }
-      await prisma.userRole.upsert({
-        where: {
-          userId_roleId: {
-            userId: targetUserId,
-            roleId: role.id,
-          },
-        },
-        create: {
-          userId: targetUserId,
-          roleId: role.id,
-        },
-        update: {},
-      });
-      console.log(`Rôle ${roleCode} assigné à ${email}.`);
-    }
+    if (role) console.log(`Rôle ${role.code} assigné à ${email}.`);
   } finally {
     await prisma.$disconnect();
   }

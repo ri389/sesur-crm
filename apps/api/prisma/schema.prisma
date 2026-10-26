@@ -73,6 +73,14 @@ model User {
   ownedCalendarEvents   CalendarEvent[] @relation("CalendarEventOwner")
   createdCalendarEvents CalendarEvent[] @relation("CalendarEventCreator")
 
+  // Lot 3 : tickets and ticket comments
+  assignedTickets        Ticket[]        @relation("TicketAssignee")
+  createdTickets         Ticket[]        @relation("TicketCreator")
+  authoredTicketComments TicketComment[] @relation("TicketCommentAuthor")
+
+  // Lot 3 : customer contracts
+  createdContracts Contract[] @relation("ContractCreator")
+
   @@index([teamId])
   @@map("app_user")
 }
@@ -262,6 +270,37 @@ enum CalendarEventStatus {
   CANCELLED
 }
 
+/// Etat du ticket SAV.
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+/// Priorite du ticket SAV.
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+/// Etat modifiable d'un contrat client. L'expiration est calculee a partir de expiresAt.
+enum ContractStatus {
+  ACTIVE
+  TERMINATED
+}
+
+/// Etat d'une livraison vers un service integre.
+enum IntegrationDeliveryStatus {
+  QUEUED
+  PROCESSING
+  DELIVERED
+  DEAD
+}
+
 /// Organisation (entreprise, institution, prospect ou client).
 model Organization {
   id                 String          @id @default(uuid(7)) @db.Uuid
@@ -283,6 +322,8 @@ model Organization {
   quotes             Quote[]
   tasks              Task[]
   calendarEvents     CalendarEvent[]
+  tickets            Ticket[]
+  contracts          Contract[]
 
   @@index([name])
   @@index([isClient])
@@ -309,6 +350,7 @@ model Contact {
   quotes         Quote[]
   tasks          Task[]
   calendarEvents CalendarEvent[]
+  tickets        Ticket[]
 
   @@index([email])
   @@index([phone])
@@ -610,4 +652,120 @@ model CalendarEvent {
   @@index([organizationId])
   @@index([contactId])
   @@map("calendar_event")
+}
+
+model Ticket {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  number      String         @unique @db.VarChar(32)
+  title       String         @db.VarChar(200)
+  description String?
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(NORMAL)
+
+  slaResponseDueAt   DateTime? @map("sla_response_due_at") @db.Timestamptz(3)
+  slaResolutionDueAt DateTime? @map("sla_resolution_due_at") @db.Timestamptz(3)
+  escalatedAt        DateTime? @map("escalated_at") @db.Timestamptz(3)
+  resolvedAt         DateTime? @map("resolved_at") @db.Timestamptz(3)
+  closedAt           DateTime? @map("closed_at") @db.Timestamptz(3)
+
+  assignedUserId String? @map("assigned_user_id") @db.Uuid
+  assignedUser   User?   @relation("TicketAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdBy       User   @relation("TicketCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  organizationId String?       @map("organization_id") @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  contactId      String?       @map("contact_id") @db.Uuid
+  contact        Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  comments TicketComment[]
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([status, priority, createdAt])
+  @@index([assignedUserId, status])
+  @@index([slaResponseDueAt, status])
+  @@index([slaResolutionDueAt, status])
+  @@index([organizationId])
+  @@index([contactId])
+  @@map("ticket")
+}
+
+model TicketComment {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  ticketId     String   @map("ticket_id") @db.Uuid
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorUserId String   @map("author_user_id") @db.Uuid
+  author       User     @relation("TicketCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  body         String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_comment")
+}
+
+model Contract {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  number      String         @unique @db.VarChar(32)
+  name        String         @db.VarChar(200)
+  description String?
+  value       Decimal        @db.Decimal(14, 2)
+  currency    String         @default("XOF") @db.VarChar(3)
+  startsAt    DateTime       @map("starts_at") @db.Timestamptz(3)
+  expiresAt   DateTime       @map("expires_at") @db.Timestamptz(3)
+  status      ContractStatus @default(ACTIVE)
+
+  organizationId  String       @map("organization_id") @db.Uuid
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdByUserId String       @map("created_by_user_id") @db.Uuid
+  createdBy       User         @relation("ContractCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([organizationId, status])
+  @@index([expiresAt, status])
+  @@map("contract")
+}
+
+/// Boite d'envoi transactionnelle des evenements vers le webhook configure.
+model IntegrationDelivery {
+  id             String                    @id @default(uuid(7)) @db.Uuid
+  idempotencyKey String                    @unique @map("idempotency_key") @db.VarChar(200)
+  eventType      String                    @map("event_type") @db.VarChar(100)
+  entityType     String                    @map("entity_type") @db.VarChar(100)
+  entityId       String?                   @map("entity_id") @db.Uuid
+  payload        Json
+  status         IntegrationDeliveryStatus @default(QUEUED)
+  attemptCount   Int                       @default(0) @map("attempt_count")
+  nextAttemptAt  DateTime                  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  lastError      String?                   @map("last_error") @db.VarChar(1000)
+  responseStatus Int?                      @map("response_status")
+  deliveredAt    DateTime?                 @map("delivered_at") @db.Timestamptz(3)
+  attempts       IntegrationAttempt[]
+  createdAt      DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([entityType, entityId])
+  @@map("integration_delivery")
+}
+
+/// Journal append-only des tentatives d'envoi d'une integration.
+model IntegrationAttempt {
+  id         String              @id @default(uuid(7)) @db.Uuid
+  deliveryId String              @map("delivery_id") @db.Uuid
+  delivery   IntegrationDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  attempt    Int
+  succeeded  Boolean
+  statusCode Int?                @map("status_code")
+  error      String?             @db.VarChar(1000)
+  occurredAt DateTime            @default(now()) @map("occurred_at") @db.Timestamptz(3)
+
+  @@index([deliveryId, occurredAt])
+  @@map("integration_attempt")
 }

@@ -54,8 +54,12 @@ export class LeadController {
       lastName?: string;
       excludeId?: string;
     },
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<{ candidates: DuplicateCandidate[] }> {
-    const candidates = await this.duplicateService.checkDuplicates(body);
+    const candidates = await this.duplicateService.checkDuplicates(
+      body,
+      accessFor(user, 'lead', 'create'),
+    );
     return { candidates };
   }
 
@@ -75,7 +79,11 @@ export class LeadController {
     @Body() dto: CreateLeadDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<Lead> {
-    return this.leadService.create(dto, user.id);
+    return this.leadService.create(
+      dto,
+      user.id,
+      accessFor(user, 'lead', 'create'),
+    );
   }
 
   @Patch(':id')

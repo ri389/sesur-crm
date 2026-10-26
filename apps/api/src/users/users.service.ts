@@ -71,83 +71,108 @@ export class UsersService {
       passwordHash = await this.passwords.hash(dto.password);
     }
 
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        firstName: dto.firstName.trim(),
-        lastName: dto.lastName.trim(),
-        teamId: dto.teamId || null,
-        managerId: dto.managerId || null,
-        isActive: dto.isActive ?? true,
-        passwordHash,
-        roles: dto.roleIds?.length
-          ? { create: dto.roleIds.map((roleId) => ({ roleId })) }
-          : undefined,
-      },
-      select: USER_PUBLIC,
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          firstName: dto.firstName.trim(),
+          lastName: dto.lastName.trim(),
+          teamId: dto.teamId || null,
+          managerId: dto.managerId || null,
+          isActive: dto.isActive ?? true,
+          passwordHash,
+          roles: dto.roleIds?.length
+            ? { create: dto.roleIds.map((roleId) => ({ roleId })) }
+            : undefined,
+        },
+        select: USER_PUBLIC,
+      });
 
-    await this.audit.record({
-      action: 'user.created',
-      entityType: 'user',
-      entityId: user.id,
-      actorUserId,
+      await this.audit.record(
+        {
+          action: 'user.created',
+          entityType: 'user',
+          entityId: user.id,
+          actorUserId,
+        },
+        tx,
+      );
+      return user;
     });
-    return user;
   }
 
   async update(id: string, dto: UpdateUserDto, actorUserId: string) {
-    await this.findById(id);
-    if (dto.roleIds) {
-      await this.prisma.userRole.deleteMany({ where: { userId: id } });
-    }
-    const user = await this.prisma.user.update({
-      where: { id },
-      data: {
-        ...(dto.firstName !== undefined ? { firstName: dto.firstName.trim() } : {}),
-        ...(dto.lastName !== undefined ? { lastName: dto.lastName.trim() } : {}),
-        ...(dto.teamId !== undefined ? { teamId: dto.teamId } : {}),
-        ...(dto.managerId !== undefined ? { managerId: dto.managerId } : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.roleIds
-          ? { roles: { create: dto.roleIds.map((roleId) => ({ roleId })) } }
-          : {}),
-      },
-      select: USER_PUBLIC,
-    });
-    if (dto.isActive === false) {
-      await this.prisma.session.updateMany({
-        where: { userId: id, revokedAt: null },
-        data: { revokedAt: new Date() },
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.user.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
       });
-    }
-    await this.audit.record({
-      action: 'user.updated',
-      entityType: 'user',
-      entityId: id,
-      actorUserId,
+      if (!existing) throw new NotFoundException('Utilisateur introuvable');
+
+      if (dto.roleIds !== undefined) {
+        await tx.userRole.deleteMany({ where: { userId: id } });
+      }
+
+      const user = await tx.user.update({
+        where: { id },
+        data: {
+          ...(dto.firstName !== undefined ? { firstName: dto.firstName.trim() } : {}),
+          ...(dto.lastName !== undefined ? { lastName: dto.lastName.trim() } : {}),
+          ...(dto.teamId !== undefined ? { teamId: dto.teamId } : {}),
+          ...(dto.managerId !== undefined ? { managerId: dto.managerId } : {}),
+          ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          ...(dto.roleIds !== undefined
+            ? { roles: { create: dto.roleIds.map((roleId) => ({ roleId })) } }
+            : {}),
+        },
+        select: USER_PUBLIC,
+      });
+
+      if (dto.isActive === false) {
+        await tx.session.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+
+      await this.audit.record({
+        action: 'user.updated',
+        entityType: 'user',
+        entityId: id,
+        actorUserId,
+      }, tx);
+      return user;
     });
-    return user;
   }
 
   async delete(id: string, actorUserId: string) {
     if (id === actorUserId) {
       throw new BadRequestException('Vous ne pouvez pas supprimer votre propre compte.');
     }
-    await this.findById(id);
-    await this.prisma.user.update({
-      where: { id },
-      data: { deletedAt: new Date(), isActive: false, passwordHash: null },
-    });
-    await this.prisma.session.updateMany({
-      where: { userId: id, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    await this.audit.record({
-      action: 'user.deleted',
-      entityType: 'user',
-      entityId: id,
-      actorUserId,
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.user.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!existing) throw new NotFoundException('Utilisateur introuvable');
+
+      await tx.user.update({
+        where: { id },
+        data: { deletedAt: new Date(), isActive: false, passwordHash: null },
+      });
+      await tx.session.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await this.audit.record(
+        {
+          action: 'user.deleted',
+          entityType: 'user',
+          entityId: id,
+          actorUserId,
+        },
+        tx,
+      );
     });
   }
 }

@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Contact, Prisma } from '@prisma/client';
 import { AuditService } from '../../audit/audit.service';
+import type { AuthenticatedUser } from '../../auth/auth.types';
+import { effectiveScope } from '../../auth/rbac';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateContactDto, UpdateContactDto } from './dto/contact.dto';
 
@@ -16,7 +18,41 @@ export class ContactService {
     private readonly audit: AuditService,
   ) {}
 
-  async findAll(params: ContactFindAllParams = {}): Promise<Contact[]> {
+  private includeFor(user: AuthenticatedUser, withInteractions = false): Prisma.ContactInclude {
+    const include: Prisma.ContactInclude = {};
+    if (effectiveScope(user, 'organization', 'read')) {
+      include.organization = { select: { id: true, name: true, isClient: true } };
+    }
+    if (withInteractions && effectiveScope(user, 'interaction', 'read')) {
+      include.interactions = {
+        orderBy: { occurredAt: 'desc' },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true } },
+        },
+      };
+    }
+    return include;
+  }
+
+  private async assertOrganizationReadable(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    user: AuthenticatedUser,
+  ): Promise<void> {
+    if (!effectiveScope(user, 'organization', 'read')) {
+      throw new ForbiddenException('Vous ne pouvez pas lier ce contact à une organisation.');
+    }
+    const organization = await tx.organization.findFirst({
+      where: { id: organizationId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!organization) throw new NotFoundException('Organisation introuvable.');
+  }
+
+  async findAll(params: ContactFindAllParams, user: AuthenticatedUser): Promise<Contact[]> {
+    if (params.organizationId && !effectiveScope(user, 'organization', 'read')) {
+      throw new ForbiddenException('Vous ne pouvez pas filtrer les contacts par organisation.');
+    }
     const where: Prisma.ContactWhereInput = {
       deletedAt: null,
       ...(params.organizationId
@@ -38,24 +74,14 @@ export class ContactService {
     return this.prisma.contact.findMany({
       where,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-      include: {
-        organization: { select: { id: true, name: true, isClient: true } },
-      },
+      include: this.includeFor(user),
     });
   }
 
-  async findById(id: string): Promise<Contact> {
+  async findById(id: string, user: AuthenticatedUser): Promise<Contact> {
     const contact = await this.prisma.contact.findFirst({
       where: { id, deletedAt: null },
-      include: {
-        organization: true,
-        interactions: {
-          orderBy: { occurredAt: 'desc' },
-          include: {
-            user: { select: { id: true, firstName: true, lastName: true } },
-          },
-        },
-      },
+      include: this.includeFor(user, true),
     });
 
     if (!contact) {
@@ -65,94 +91,121 @@ export class ContactService {
     return contact;
   }
 
-  async create(dto: CreateContactDto, actorUserId?: string): Promise<Contact> {
-    const contact = await this.prisma.contact.create({
-      data: {
-        firstName: dto.firstName.trim(),
-        lastName: dto.lastName.trim(),
-        organizationId: dto.organizationId || null,
-        email: dto.email?.trim().toLowerCase() || null,
-        phone: dto.phone?.trim() || null,
-        jobTitle: dto.jobTitle?.trim() || null,
-        preferences: dto.preferences?.trim() || null,
-      },
-      include: {
-        organization: { select: { id: true, name: true, isClient: true } },
-      },
-    });
+  async create(dto: CreateContactDto, user: AuthenticatedUser): Promise<Contact> {
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.organizationId) {
+        await this.assertOrganizationReadable(tx, dto.organizationId, user);
+      }
+      const contact = await tx.contact.create({
+        data: {
+          firstName: dto.firstName.trim(),
+          lastName: dto.lastName.trim(),
+          organizationId: dto.organizationId || null,
+          email: dto.email?.trim().toLowerCase() || null,
+          phone: dto.phone?.trim() || null,
+          jobTitle: dto.jobTitle?.trim() || null,
+          preferences: dto.preferences?.trim() || null,
+        },
+        include: this.includeFor(user),
+      });
 
-    await this.audit.record({
-      action: 'contact.created',
-      entityType: 'contact',
-      entityId: contact.id,
-      actorUserId: actorUserId ?? null,
-      metadata: { organizationId: contact.organizationId },
+      await this.audit.record(
+        {
+          action: 'contact.created',
+          entityType: 'contact',
+          entityId: contact.id,
+          actorUserId: user.id,
+          metadata: { organizationId: contact.organizationId },
+        },
+        tx,
+      );
+      return contact;
     });
-
-    return contact;
   }
 
   async update(
     id: string,
     dto: UpdateContactDto,
-    actorUserId?: string,
+    user: AuthenticatedUser,
   ): Promise<Contact> {
-    await this.findById(id);
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.organizationId) {
+        await this.assertOrganizationReadable(tx, dto.organizationId, user);
+      }
+      const existing = await tx.contact.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!existing) {
+        throw new NotFoundException(`Contact introuvable (ID: ${id})`);
+      }
 
-    const updated = await this.prisma.contact.update({
-      where: { id },
-      data: {
-        ...(dto.firstName !== undefined
-          ? { firstName: dto.firstName.trim() }
-          : {}),
-        ...(dto.lastName !== undefined
-          ? { lastName: dto.lastName.trim() }
-          : {}),
-        ...(dto.organizationId !== undefined
-          ? { organizationId: dto.organizationId }
-          : {}),
-        ...(dto.email !== undefined
-          ? { email: dto.email?.trim().toLowerCase() || null }
-          : {}),
-        ...(dto.phone !== undefined
-          ? { phone: dto.phone?.trim() || null }
-          : {}),
-        ...(dto.jobTitle !== undefined
-          ? { jobTitle: dto.jobTitle?.trim() || null }
-          : {}),
-        ...(dto.preferences !== undefined
-          ? { preferences: dto.preferences?.trim() || null }
-          : {}),
-      },
-      include: {
-        organization: { select: { id: true, name: true, isClient: true } },
-      },
+      const updated = await tx.contact.update({
+        where: { id },
+        data: {
+          ...(dto.firstName !== undefined
+            ? { firstName: dto.firstName.trim() }
+            : {}),
+          ...(dto.lastName !== undefined
+            ? { lastName: dto.lastName.trim() }
+            : {}),
+          ...(dto.organizationId !== undefined
+            ? { organizationId: dto.organizationId }
+            : {}),
+          ...(dto.email !== undefined
+            ? { email: dto.email?.trim().toLowerCase() || null }
+            : {}),
+          ...(dto.phone !== undefined
+            ? { phone: dto.phone?.trim() || null }
+            : {}),
+          ...(dto.jobTitle !== undefined
+            ? { jobTitle: dto.jobTitle?.trim() || null }
+            : {}),
+          ...(dto.preferences !== undefined
+            ? { preferences: dto.preferences?.trim() || null }
+            : {}),
+        },
+        include: this.includeFor(user),
+      });
+
+      await this.audit.record(
+        {
+          action: 'contact.updated',
+          entityType: 'contact',
+          entityId: id,
+          actorUserId: user.id,
+          metadata: { changedFields: Object.keys(dto) },
+        },
+        tx,
+      );
+
+      return updated;
     });
-
-    await this.audit.record({
-      action: 'contact.updated',
-      entityType: 'contact',
-      entityId: id,
-      actorUserId: actorUserId ?? null,
-      metadata: { changes: dto as unknown as Prisma.InputJsonObject },
-    });
-
-    return updated;
   }
 
   async delete(id: string, actorUserId?: string): Promise<void> {
-    await this.findById(id);
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.contact.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!existing) {
+        throw new NotFoundException(`Contact introuvable (ID: ${id})`);
+      }
 
-    await this.prisma.contact.update({
-      where: { id },
-      data: { deletedAt: new Date() },
-    });
-
-    await this.audit.record({
-      action: 'contact.deleted',
-      entityType: 'contact',
-      entityId: id,
-      actorUserId: actorUserId ?? null,
+      await tx.contact.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await this.audit.record(
+        {
+          action: 'contact.deleted',
+          entityType: 'contact',
+          entityId: id,
+          actorUserId: actorUserId ?? null,
+        },
+        tx,
+      );
     });
   }
 }

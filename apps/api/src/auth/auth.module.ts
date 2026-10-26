@@ -5,6 +5,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AUTH_SETTINGS, loadAuthSettings } from './auth.settings';
 import { PasswordService } from './password.service';
+import { LoginRateLimitGuard } from './login-rate-limit.guard';
 import { PermissionsGuard } from './permissions.guard';
 import { SessionGuard } from './session.guard';
 import { SessionService } from './session.service';
@@ -18,6 +19,7 @@ import { SessionService } from './session.service';
       useFactory: loadAuthSettings,
     },
     PasswordService,
+    LoginRateLimitGuard,
     SessionService,
     AuthService,
     { provide: APP_GUARD, useClass: SessionGuard },

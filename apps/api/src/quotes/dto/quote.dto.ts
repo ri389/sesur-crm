@@ -7,9 +7,12 @@ import {
   Max,
   Min,
   ValidateNested,
+  IsString,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { QuoteStatus } from '@prisma/client';
+
 
 export class QuoteItemDto {
   @IsUUID()
@@ -90,4 +93,11 @@ export class QuoteResponseDto {
   createdAt!: Date;
   updatedAt!: Date;
   createdBy!: string;
+}
+
+export class QuoteApprovalDecisionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  comments?: string;
 }

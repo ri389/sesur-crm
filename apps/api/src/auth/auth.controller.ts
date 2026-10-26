@@ -8,6 +8,7 @@ import {
   Post,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import type { CookieOptions, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -19,6 +20,7 @@ import { CurrentUser } from './current-user.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { Public } from './public.decorator';
+import { LoginRateLimitGuard } from './login-rate-limit.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -37,6 +39,7 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(LoginRateLimitGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(

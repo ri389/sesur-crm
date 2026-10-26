@@ -1,59 +1,123 @@
-import { FormEvent, useEffect, useState } from 'react'
-import { api, type AuditRow, type DirectoryUser, type Product, type Role } from '../api'
+import { useCallback, useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
+import { api, can, type AuditRow, type DirectoryUser, type Product, type Role, type User } from '../api'
 import { changePassword } from '../api'
 
-export function UsersPage() {
+export function UsersPage({ user: currentUser }: { user: User }) {
   const [users, setUsers] = useState<DirectoryUser[]>([])
   const [roles, setRoles] = useState<Role[]>([])
-  useEffect(() => {
-    void api.users.list().then(setUsers)
-    void api.roles().then(setRoles)
+  const [editingUser, setEditingUser] = useState<DirectoryUser | null>(null)
+  const [error, setError] = useState('')
+
+  const loadDirectory = useCallback(async () => {
+    const [nextUsers, nextRoles] = await Promise.all([api.users.list(), api.roles()])
+    setUsers(nextUsers)
+    setRoles(nextRoles)
   }, [])
+
+  useEffect(() => {
+    void loadDirectory()
+  }, [loadDirectory])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const roleId = String(form.get('roleId') ?? '')
-    await api.users.create({
-      firstName: form.get('firstName'),
-      lastName: form.get('lastName'),
-      email: form.get('email'),
-      password: form.get('password'),
-      roleIds: roleId ? [roleId] : [],
-    })
-    setUsers(await api.users.list())
-    event.currentTarget.reset()
+    const element = event.currentTarget
+    const form = new FormData(element)
+    const fields = {
+      firstName: String(form.get('firstName') ?? ''),
+      lastName: String(form.get('lastName') ?? ''),
+      roleIds: form.getAll('roleIds').map(String).filter(Boolean),
+    }
+
+    try {
+      if (editingUser) {
+        await api.users.update(editingUser.id, {
+          ...fields,
+          isActive: form.get('isActive') === 'true',
+        })
+      } else {
+        await api.users.create({
+          ...fields,
+          email: String(form.get('email') ?? ''),
+          password: String(form.get('password') ?? ''),
+        })
+      }
+      await loadDirectory()
+      setEditingUser(null)
+      setError('')
+      element.reset()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible d’enregistrer cet utilisateur.')
+    }
   }
+
+  async function remove(userToRemove: DirectoryUser) {
+    if (!window.confirm(`Supprimer le compte de ${userToRemove.firstName} ${userToRemove.lastName} ?`)) return
+    try {
+      await api.users.delete(userToRemove.id)
+      await loadDirectory()
+      setError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible de supprimer cet utilisateur.')
+    }
+  }
+
+  const canEditForm = editingUser
+    ? can(currentUser, 'user', 'update')
+    : can(currentUser, 'user', 'create')
 
   return (
     <>
       <h2>Utilisateurs</h2>
-      <form className="form" onSubmit={(e) => void submit(e)}>
-        <label>
-          Prénom <input name="firstName" required />
-        </label>
-        <label>
-          Nom <input name="lastName" required />
-        </label>
-        <label>
-          E-mail <input name="email" type="email" required />
-        </label>
-        <label>
-          Mot de passe initial <input name="password" type="password" minLength={12} required />
-        </label>
-        <label>
-          Rôle
-          <select name="roleId" defaultValue="">
-            <option value="">Aucun</option>
+      {canEditForm && (
+        <form className="form" key={editingUser?.id ?? 'new-user'} onSubmit={(e) => void submit(e)}>
+          <h3>{editingUser ? `Modifier ${editingUser.firstName} ${editingUser.lastName}` : 'Créer un utilisateur'}</h3>
+          <label>
+            Prénom <input name="firstName" defaultValue={editingUser?.firstName} required />
+          </label>
+          <label>
+            Nom <input name="lastName" defaultValue={editingUser?.lastName} required />
+          </label>
+          {!editingUser && (
+            <>
+              <label>
+                E-mail <input name="email" type="email" required />
+              </label>
+              <label>
+                Mot de passe initial <input name="password" type="password" minLength={12} required />
+              </label>
+            </>
+          )}
+          <fieldset>
+            <legend>Rôles</legend>
             {roles.map((role) => (
-              <option key={role.id} value={role.id}>
+              <label key={role.id}>
+                <input
+                  type="checkbox"
+                  name="roleIds"
+                  value={role.id}
+                  defaultChecked={editingUser?.roles.some((entry) => entry.role.id === role.id) ?? false}
+                />
                 {role.name}
-              </option>
+              </label>
             ))}
-          </select>
-        </label>
-        <button type="submit">Créer</button>
-      </form>
+          </fieldset>
+          {editingUser && (
+            <label>
+              Statut
+              <select name="isActive" defaultValue={editingUser.isActive ? 'true' : 'false'}>
+                <option value="true">Actif</option>
+                <option value="false">Inactif</option>
+              </select>
+            </label>
+          )}
+          <div className="form-actions">
+            {editingUser && <button type="button" className="btn-secondary" onClick={() => setEditingUser(null)}>Annuler</button>}
+            <button type="submit">{editingUser ? 'Enregistrer' : 'Créer'}</button>
+          </div>
+        </form>
+      )}
+      {error && <p role="alert" className="form-error">{error}</p>}
       <table>
         <thead>
           <tr>
@@ -61,17 +125,26 @@ export function UsersPage() {
             <th>E-mail</th>
             <th>Rôles</th>
             <th>Statut</th>
+            {(can(currentUser, 'user', 'update') || can(currentUser, 'user', 'delete')) && <th>Actions</th>}
           </tr>
         </thead>
         <tbody>
-          {users.map((user) => (
-            <tr key={user.id}>
+          {users.map((userRow) => (
+            <tr key={userRow.id}>
               <td>
-                {user.firstName} {user.lastName}
+                {userRow.firstName} {userRow.lastName}
               </td>
-              <td>{user.email}</td>
-              <td>{user.roles.map((entry) => entry.role.name).join(', ') || '—'}</td>
-              <td>{user.isActive ? 'Actif' : 'Inactif'}</td>
+              <td>{userRow.email}</td>
+              <td>{userRow.roles.map((entry) => entry.role.name).join(', ') || '—'}</td>
+              <td>{userRow.isActive ? 'Actif' : 'Inactif'}</td>
+              {(can(currentUser, 'user', 'update') || can(currentUser, 'user', 'delete')) && (
+                <td>
+                  {can(currentUser, 'user', 'update') && <button type="button" onClick={() => setEditingUser(userRow)}>Modifier</button>}{' '}
+                  {can(currentUser, 'user', 'delete') && userRow.id !== currentUser.id && (
+                    <button type="button" onClick={() => void remove(userRow)}>Supprimer</button>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -80,7 +153,7 @@ export function UsersPage() {
   )
 }
 
-export function ProductsPage() {
+export function ProductsPage({ user }: { user: User }) {
   const [products, setProducts] = useState<Product[]>([])
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [isAdding, setIsAdding] = useState(false)
@@ -121,10 +194,12 @@ export function ProductsPage() {
     <>
       <div className="page-header">
         <h2>Catalogue Produits</h2>
-        <button type="button" onClick={() => setIsAdding(true)}>+ Ajouter un produit</button>
+        {can(user, 'product', 'create') && (
+          <button type="button" onClick={() => setIsAdding(true)}>+ Ajouter un produit</button>
+        )}
       </div>
 
-      {(isAdding || editingProduct) && (
+      {(can(user, 'product', 'create') || can(user, 'product', 'update')) && (isAdding || editingProduct) && (
         <div className="modal-overlay">
           <div className="modal">
             <h3>{editingProduct ? 'Modifier le produit' : 'Nouveau produit'}</h3>
@@ -169,7 +244,7 @@ export function ProductsPage() {
             <th>Nom</th>
             <th>Prix</th>
             <th>Statut</th>
-            <th>Actions</th>
+            {can(user, 'product', 'update') && <th>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -183,14 +258,14 @@ export function ProductsPage() {
                   {product.status}
                 </span>
               </td>
-              <td>
-                <button type="button" onClick={() => setEditingProduct(product)}>Modifier</button>
-              </td>
+              {can(user, 'product', 'update') && (
+                <td><button type="button" onClick={() => setEditingProduct(product)}>Modifier</button></td>
+              )}
             </tr>
           ))}
           {products.length === 0 && (
             <tr>
-              <td colSpan={5} className="centered">Aucun produit trouvé.</td>
+              <td colSpan={can(user, 'product', 'update') ? 5 : 4} className="centered">Aucun produit trouvé.</td>
             </tr>
           )}
         </tbody>

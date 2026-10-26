@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { leadScopeWhere } from '../../auth/access';
+import type { AccessContext } from '../../auth/access';
 import { AuditService } from '../../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -99,6 +101,7 @@ export class DuplicateService {
 
   async checkDuplicates(
     input: DuplicateCheckInput,
+    leadAccess?: AccessContext,
   ): Promise<DuplicateCandidate[]> {
     const email = normalizeEmail(input.email);
     const phone = normalizePhone(input.phone);
@@ -114,6 +117,7 @@ export class DuplicateService {
         where: {
           email: { equals: email, mode: 'insensitive' },
           deletedAt: null,
+          ...(leadAccess ? leadScopeWhere(leadAccess) : {}),
           ...(input.excludeId ? { id: { not: input.excludeId } } : {}),
         },
         select: { id: true, firstName: true, lastName: true, companyName: true },
@@ -158,6 +162,7 @@ export class DuplicateService {
         where: {
           phone: { contains: phone.slice(-8) },
           deletedAt: null,
+          ...(leadAccess ? leadScopeWhere(leadAccess) : {}),
           ...(input.excludeId ? { id: { not: input.excludeId } } : {}),
         },
         select: { id: true, firstName: true, lastName: true, phone: true },
@@ -232,102 +237,139 @@ export class DuplicateService {
       throw new BadRequestException('Choisissez deux fiches distinctes à fusionner.');
     }
 
-    if (type === 'LEAD') {
-      const [keep, drop] = await Promise.all([
-        this.prisma.lead.findFirst({ where: { id: keepId, deletedAt: null } }),
-        this.prisma.lead.findFirst({ where: { id: dropId, deletedAt: null } }),
-      ]);
-      if (!keep || !drop) throw new NotFoundException('Prospect introuvable');
-      await this.prisma.$transaction([
-        this.prisma.interaction.updateMany({
+    await this.prisma.$transaction(async (tx) => {
+      if (type === 'LEAD') {
+        const [keep, drop] = await Promise.all([
+          tx.lead.findFirst({ where: { id: keepId, deletedAt: null } }),
+          tx.lead.findFirst({ where: { id: dropId, deletedAt: null } }),
+        ]);
+        if (!keep || !drop) throw new NotFoundException('Prospect introuvable');
+
+        await tx.interaction.updateMany({
           where: { leadId: dropId },
           data: { leadId: keepId },
-        }),
-        this.prisma.lead.update({
+        });
+        await tx.opportunity.updateMany({
+          where: { leadId: dropId },
+          data: { leadId: keepId },
+        });
+        await tx.lead.update({
           where: { id: keepId },
           data: {
             email: keep.email ?? drop.email,
             phone: keep.phone ?? drop.phone,
             companyName: keep.companyName ?? drop.companyName,
           },
-        }),
-        this.prisma.lead.update({
+        });
+        await tx.lead.update({
           where: { id: dropId },
           data: { deletedAt: new Date() },
-        }),
-      ]);
-    } else if (type === 'CONTACT') {
-      const [keep, drop] = await Promise.all([
-        this.prisma.contact.findFirst({ where: { id: keepId, deletedAt: null } }),
-        this.prisma.contact.findFirst({ where: { id: dropId, deletedAt: null } }),
-      ]);
-      if (!keep || !drop) throw new NotFoundException('Contact introuvable');
-      await this.prisma.$transaction([
-        this.prisma.interaction.updateMany({
+        });
+      } else if (type === 'CONTACT') {
+        const [keep, drop] = await Promise.all([
+          tx.contact.findFirst({ where: { id: keepId, deletedAt: null } }),
+          tx.contact.findFirst({ where: { id: dropId, deletedAt: null } }),
+        ]);
+        if (!keep || !drop) throw new NotFoundException('Contact introuvable');
+
+        await tx.interaction.updateMany({
           where: { contactId: dropId },
           data: { contactId: keepId },
-        }),
-        this.prisma.lead.updateMany({
+        });
+        await tx.lead.updateMany({
           where: { contactId: dropId },
           data: { contactId: keepId },
-        }),
-        this.prisma.contact.update({
+        });
+        await tx.opportunity.updateMany({
+          where: { contactId: dropId },
+          data: { contactId: keepId },
+        });
+        await tx.quote.updateMany({
+          where: { contactId: dropId },
+          data: { contactId: keepId },
+        });
+        await tx.task.updateMany({
+          where: { contactId: dropId },
+          data: { contactId: keepId },
+        });
+        await tx.calendarEvent.updateMany({
+          where: { contactId: dropId },
+          data: { contactId: keepId },
+        });
+        await tx.contact.update({
           where: { id: keepId },
           data: {
             email: keep.email ?? drop.email,
             phone: keep.phone ?? drop.phone,
             organizationId: keep.organizationId ?? drop.organizationId,
           },
-        }),
-        this.prisma.contact.update({
+        });
+        await tx.contact.update({
           where: { id: dropId },
           data: { deletedAt: new Date() },
-        }),
-      ]);
-    } else {
-      const [keep, drop] = await Promise.all([
-        this.prisma.organization.findFirst({
-          where: { id: keepId, deletedAt: null },
-        }),
-        this.prisma.organization.findFirst({
-          where: { id: dropId, deletedAt: null },
-        }),
-      ]);
-      if (!keep || !drop) throw new NotFoundException('Organisation introuvable');
-      await this.prisma.$transaction([
-        this.prisma.contact.updateMany({
+        });
+      } else {
+        const [keep, drop] = await Promise.all([
+          tx.organization.findFirst({
+            where: { id: keepId, deletedAt: null },
+          }),
+          tx.organization.findFirst({
+            where: { id: dropId, deletedAt: null },
+          }),
+        ]);
+        if (!keep || !drop) {
+          throw new NotFoundException('Organisation introuvable');
+        }
+
+        await tx.contact.updateMany({
           where: { organizationId: dropId },
           data: { organizationId: keepId },
-        }),
-        this.prisma.lead.updateMany({
+        });
+        await tx.lead.updateMany({
           where: { organizationId: dropId },
           data: { organizationId: keepId },
-        }),
-        this.prisma.interaction.updateMany({
+        });
+        await tx.interaction.updateMany({
           where: { organizationId: dropId },
           data: { organizationId: keepId },
-        }),
-        this.prisma.organization.update({
+        });
+        await tx.opportunity.updateMany({
+          where: { organizationId: dropId },
+          data: { organizationId: keepId },
+        });
+        await tx.quote.updateMany({
+          where: { organizationId: dropId },
+          data: { organizationId: keepId },
+        });
+        await tx.task.updateMany({
+          where: { organizationId: dropId },
+          data: { organizationId: keepId },
+        });
+        await tx.calendarEvent.updateMany({
+          where: { organizationId: dropId },
+          data: { organizationId: keepId },
+        });
+        await tx.organization.update({
           where: { id: keepId },
           data: {
             email: keep.email ?? drop.email,
             phone: keep.phone ?? drop.phone,
             isClient: keep.isClient || drop.isClient,
           },
-        }),
-        this.prisma.organization.update({
+        });
+        await tx.organization.update({
           where: { id: dropId },
           data: { deletedAt: new Date() },
-        }),
-      ]);
-    }
+        });
+      }
 
-    await this.audit.record({
-      action: 'duplicate.merged',
-      entityType: type.toLowerCase(),
-      entityId: keepId,
-      actorUserId,
-      metadata: { dropId, type },
+      await this.audit.record({
+        action: 'duplicate.merged',
+        entityType: type.toLowerCase(),
+        entityId: keepId,
+        actorUserId,
+        metadata: { dropId, type },
+      }, tx);
     });
     return { keepId, dropId };
   }

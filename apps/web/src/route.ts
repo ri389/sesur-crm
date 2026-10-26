@@ -13,11 +13,17 @@ export type Route =
   | { name: 'products' }
   | { name: 'import' }
   | { name: 'audit' }
+  | { name: 'integrations' }
   | { name: 'profile' }
   | { name: 'opportunities' }
   | { name: 'opportunity-new' }
   | { name: 'opportunity'; id: string }
   | { name: 'quotes' }
+  | { name: 'tasks' }
+  | { name: 'calendar' }
+  | { name: 'tickets' }
+  | { name: 'ticket'; id: string }
+  | { name: 'contracts' }
   | { name: 'quote-new' }
   | { name: 'quote'; id: string }
   | { name: 'quote-edit'; id: string }
@@ -39,7 +45,15 @@ export function parseHash(hash: string): Route {
   if (parts[0] === 'admin' && parts[1] === 'produits') return { name: 'products' }
   if (parts[0] === 'admin' && parts[1] === 'import') return { name: 'import' }
   if (parts[0] === 'admin' && parts[1] === 'audit') return { name: 'audit' }
+  if (parts[0] === 'admin' && parts[1] === 'integrations') return { name: 'integrations' }
   if (parts[0] === 'profil') return { name: 'profile' }
+  if (parts[0] === 'taches') return { name: 'tasks' }
+  if (parts[0] === 'agenda') return { name: 'calendar' }
+  if (parts[0] === 'sav' && parts[1] === 'tickets' && parts[2]) {
+    return { name: 'ticket', id: parts[2] }
+  }
+  if (parts[0] === 'sav' && parts[1] === 'tickets') return { name: 'tickets' }
+  if (parts[0] === 'contrats') return { name: 'contracts' }
   if (parts[0] === 'opportunities') {
     if (parts[1] === 'nouveau') return { name: 'opportunity-new' }
     if (parts[1]) return { name: 'opportunity', id: parts[1] }

@@ -8,7 +8,9 @@ import {
   type Product,
   type Quote,
   type User,
+  type QuoteApprovalDecisionDto,
 } from '../api'
+import { MetricCards } from '../components/MetricCards'
 
 const STATUS_LABEL: Record<Quote['status'], string> = {
   DRAFT: 'Brouillon',
@@ -62,6 +64,7 @@ export function QuotesPage({ user }: { user: User }) {
       .toLowerCase()
       .includes(search.toLowerCase()),
   )
+  const visibleAmount = filtered.reduce((total, quote) => total + (Number(quote.totalTTC) || 0), 0)
 
   return (
     <>
@@ -74,6 +77,13 @@ export function QuotesPage({ user }: { user: User }) {
           <a className="button" href="#/quotes/nouveau">+ Nouveau devis</a>
         )}
       </header>
+
+      <MetricCards items={[
+        { label: 'Devis affichés', value: filtered.length, detail: 'selon la recherche', tone: 'blue' },
+        { label: 'En validation', value: filtered.filter((quote) => quote.status === 'PENDING_APPROVAL').length, detail: 'à traiter', tone: 'amber' },
+        { label: 'Acceptés', value: filtered.filter((quote) => quote.status === 'ACCEPTED').length, detail: 'par les clients', tone: 'mint' },
+        { label: 'Montant affiché', value: money(visibleAmount), detail: 'total TTC · XOF', tone: 'violet' },
+      ]} />
 
       <div className="filters">
         <input
@@ -311,6 +321,9 @@ export function QuoteDetailPage({
   const [quote, setQuote] = useState<Quote | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [processing, setProcessing] = useState(false)
+  const [comments, setComments] = useState('')
+  const [actionMessage, setActionMessage] = useState('')
 
   useEffect(() => {
     let active = true
@@ -336,6 +349,56 @@ export function QuoteDetailPage({
       active = false
     }
   }, [id])
+ async function handleQuoteAction(
+    action: 'submit' | 'approve' | 'reject',
+  ) {
+    if (!quote || processing) return
+
+    setProcessing(true)
+    setError('')
+    setActionMessage('')
+
+    try {
+      let updatedQuote: Quote
+
+      if (action === 'submit') {
+        updatedQuote = await api.quotes.submitForApproval(quote.id)
+      } else {
+        const body: QuoteApprovalDecisionDto = {
+          comments: comments.trim() || undefined,
+        }
+
+        if (action === 'approve') {
+          updatedQuote = await api.quotes.approve(quote.id, body)
+        } else {
+          if (!comments.trim()) {
+            setError('Indique un motif avant de rejeter le devis.')
+            return
+          }
+
+          updatedQuote = await api.quotes.reject(quote.id, body)
+        }
+      }
+
+      setQuote(updatedQuote)
+      setComments('')
+      setActionMessage(
+        action === 'submit'
+          ? 'Le devis a été soumis à validation.'
+          : action === 'approve'
+            ? 'Le devis a été approuvé.'
+            : 'Le devis a été rejeté et renvoyé pour correction.',
+      )
+    } catch (err: unknown) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Une erreur est survenue lors du traitement du devis.",
+      )
+    } finally {
+      setProcessing(false)
+    }
+  }
 
   if (loading) return <p>Chargement du devis...</p>
 
@@ -372,6 +435,64 @@ export function QuoteDetailPage({
           <p>
             <strong>Statut :</strong> {STATUS_LABEL[quote.status]}
           </p>
+                    {quote.status === 'DRAFT' &&
+            can(user, 'quote', 'update') && (
+              <p>
+                <button
+                  type="button"
+                  disabled={processing}
+                  onClick={() => void handleQuoteAction('submit')}
+                >
+                  {processing ? 'Traitement...' : 'Soumettre à validation'}
+                </button>
+              </p>
+            )}
+
+          {quote.status === 'PENDING_APPROVAL' &&
+            can(user, 'quote', 'approve') && (
+              <div className="form-group">
+                <label htmlFor="quote-approval-comments">
+                  Commentaire (obligatoire pour un rejet)
+                </label>
+                <textarea
+                  id="quote-approval-comments"
+                  value={comments}
+                  onChange={(event) => setComments(event.target.value)}
+                  maxLength={1000}
+                  rows={3}
+                  placeholder="Commentaire ou motif du rejet..."
+                  disabled={processing}
+                />
+
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    disabled={processing}
+                    onClick={() => void handleQuoteAction('approve')}
+                  >
+                    Approuver
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={processing || !comments.trim()}
+                    onClick={() => void handleQuoteAction('reject')}
+                  >
+                    Rejeter
+                  </button>
+                </div>
+              </div>
+            )}
+
+          {actionMessage && (
+            <p role="status">{actionMessage}</p>
+          )}
+
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+          )}
       {quote.status === 'DRAFT' && can(user, 'quote', 'update') && (
           <p>
             <a className="button" href={`#/quotes/${quote.id}/modifier`}>
@@ -503,16 +624,6 @@ export function QuoteEditPage({
       active = false
     }
   }, [id])
-
-  const activeProducts = products.filter(
-    (product) => product.status === 'ACTIVE',
-  )
-
-  const selectedOrganization = organizations.find(
-    (org) => org.id === organizationId,
-  )
-
-  const contacts = selectedOrganization?.contacts ?? []
 
   const estimatedTotal = items.reduce((sum, item) => {
     const product = products.find((p) => p.id === item.productId)

@@ -24,16 +24,20 @@ export class ContactController {
   @Get()
   @RequirePermission('contact', 'read')
   async findAll(
+    @CurrentUser() user: AuthenticatedUser,
     @Query('organizationId') organizationId?: string,
     @Query('search') search?: string,
   ): Promise<Contact[]> {
-    return this.contactService.findAll({ organizationId, search });
+    return this.contactService.findAll({ organizationId, search }, user);
   }
 
   @Get(':id')
   @RequirePermission('contact', 'read')
-  async findById(@Param('id') id: string): Promise<Contact> {
-    return this.contactService.findById(id);
+  async findById(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<Contact> {
+    return this.contactService.findById(id, user);
   }
 
   @Post()
@@ -43,7 +47,7 @@ export class ContactController {
     @Body() dto: CreateContactDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<Contact> {
-    return this.contactService.create(dto, user.id);
+    return this.contactService.create(dto, user);
   }
 
   @Patch(':id')
@@ -53,7 +57,7 @@ export class ContactController {
     @Body() dto: UpdateContactDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<Contact> {
-    return this.contactService.update(id, dto, user.id);
+    return this.contactService.update(id, dto, user);
   }
 
   @Delete(':id')
