@@ -352,14 +352,29 @@ export class TicketsService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (!ticket) throw new NotFoundException('Ticket introuvable.');
-    const history = await this.prisma.auditLog.findMany({
+    const historyRows = await this.prisma.auditLog.findMany({
       where: { entityType: 'ticket', entityId: id },
       orderBy: { occurredAt: 'desc' },
       take: 100,
-      include: {
-        actor: { select: { id: true, firstName: true, lastName: true } },
-      },
     });
+    const actorIds = [
+      ...new Set(
+        historyRows
+          .map((entry) => entry.actorUserId)
+          .filter((actorId): actorId is string => Boolean(actorId)),
+      ),
+    ];
+    const actors = actorIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: actorIds } },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : [];
+    const actorsById = new Map(actors.map((actor) => [actor.id, actor]));
+    const history = historyRows.map((entry) => ({
+      ...entry,
+      actor: entry.actorUserId ? (actorsById.get(entry.actorUserId) ?? null) : null,
+    }));
     return { ...ticket, history };
   }
 

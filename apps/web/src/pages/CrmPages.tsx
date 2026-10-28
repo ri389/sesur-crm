@@ -40,9 +40,11 @@ function ErrorText({ error }: { error: unknown }) {
 function DuplicateList({
   candidates,
   onKeep,
+  busy = false,
 }: {
   candidates: DuplicateCandidate[]
   onKeep?: (candidate: DuplicateCandidate) => void
+  busy?: boolean
 }) {
   if (candidates.length === 0) return null
   return (
@@ -61,8 +63,8 @@ function DuplicateList({
             {onKeep && (
               <>
                 {' '}
-                <button type="button" className="linkish" onClick={() => onKeep(candidate)}>
-                  Fusionner vers cette fiche
+                <button type="button" className="linkish" disabled={busy} aria-busy={busy || undefined} onClick={() => onKeep(candidate)}>
+                  {busy && <span className="button-spinner" aria-hidden="true" />} {busy ? 'Fusion…' : 'Fusionner vers cette fiche'}
                 </button>
               </>
             )}
@@ -300,6 +302,7 @@ export function LeadFormPage({ user }: { user: User }) {
   const [error, setError] = useState<unknown>(null)
   const [candidates, setCandidates] = useState<DuplicateCandidate[]>([])
   const [pending, setPending] = useState<CreateLeadDto | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   async function submit(event: FormEvent<HTMLFormElement>, bypass = false) {
     event.preventDefault()
@@ -314,6 +317,7 @@ export function LeadFormPage({ user }: { user: User }) {
       ...(bypass ? { bypassDuplicateWarning: true } : {}),
     }
     setError(null)
+    setSubmitting(true)
     try {
       const lead = await api.leads.create(body)
       window.location.hash = `#/leads/${lead.id}`
@@ -325,6 +329,8 @@ export function LeadFormPage({ user }: { user: User }) {
       } else {
         setError(err)
       }
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -343,10 +349,18 @@ export function LeadFormPage({ user }: { user: User }) {
         <div className="warning-banner">
           <DuplicateList 
             candidates={candidates} 
+            busy={submitting}
             onKeep={async (c) => {
               if (confirm(`Fusionner avec ${c.title} ?`)) {
-                await api.merge({ type: c.type, keepId: c.id, dropId: 'NEW' })
-                window.location.hash = `#/leads/${c.id}`
+                setSubmitting(true)
+                try {
+                  await api.merge({ type: c.type, keepId: c.id, dropId: 'NEW' })
+                  window.location.hash = `#/leads/${c.id}`
+                } catch (reason) {
+                  setError(reason)
+                } finally {
+                  setSubmitting(false)
+                }
               }
             }} 
           />
@@ -383,22 +397,25 @@ export function LeadFormPage({ user }: { user: User }) {
           </select>
         </label>
         <div className="form-actions">
-          <button type="submit">Enregistrer le prospect</button>
+          <button type="submit" disabled={submitting} aria-busy={submitting || undefined}>{submitting && <span className="button-spinner" aria-hidden="true" />} {submitting ? 'Enregistrement…' : 'Enregistrer le prospect'}</button>
           {pending && (
             <button 
               type="button" 
               className="btn-warning" 
+              disabled={submitting}
+              aria-busy={submitting || undefined}
               onClick={() => {
                 setError(null)
-                void api.leads
-                  .create({ ...pending, bypassDuplicateWarning: true })
+                setSubmitting(true)
+                void api.leads.create({ ...pending, bypassDuplicateWarning: true })
                   .then((lead) => {
                     window.location.hash = `#/leads/${lead.id}`
                   })
                   .catch((err: unknown) => setError(err))
+                  .finally(() => setSubmitting(false))
               }}
             >
-              Créer malgré les doublons
+              {submitting && <span className="button-spinner" aria-hidden="true" />} {submitting ? 'Création…' : 'Créer malgré les doublons'}
             </button>
           )}
         </div>
@@ -412,19 +429,30 @@ function InteractionForm({
 }: {
   target: { leadId?: string; contactId?: string; organizationId?: string }
 }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<unknown>(null)
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = event.currentTarget
     const data = new FormData(form)
-    await api.interactions.create({
-      ...target,
-      channel: data.get('channel'),
-      summary: data.get('summary'),
-    })
-    window.location.reload()
+    setSaving(true)
+    setError(null)
+    try {
+      await api.interactions.create({
+        ...target,
+        channel: data.get('channel'),
+        summary: data.get('summary'),
+      })
+      window.location.reload()
+    } catch (reason) {
+      setError(reason)
+    } finally {
+      setSaving(false)
+    }
   }
   return (
     <form className="form inline" onSubmit={(e) => void submit(e)}>
+      <ErrorText error={error} />
       <label>
         Canal
         <select name="channel" defaultValue="NOTE">
@@ -438,7 +466,7 @@ function InteractionForm({
       <label>
         Résumé <input name="summary" required />
       </label>
-      <button type="submit">Ajouter une interaction</button>
+      <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Ajout…' : 'Ajouter une interaction'}</button>
     </form>
   )
 }
@@ -459,10 +487,39 @@ function InteractionList({ items }: { items?: Interaction[] }) {
 export function LeadDetailPage({ id, user }: { id: string; user: User }) {
   const [lead, setLead] = useState<Lead | null>(null)
   const [error, setError] = useState<unknown>(null)
+  const [actionError, setActionError] = useState('')
+  const [processingAction, setProcessingAction] = useState('')
 
   useEffect(() => {
     void api.leads.get(id).then(setLead).catch(setError)
   }, [id])
+
+  async function qualifyLead() {
+    if (!lead) return
+    setProcessingAction('qualify')
+    setActionError('')
+    try {
+      setLead(await api.leads.qualify(lead.id))
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Impossible de qualifier ce prospect.')
+    } finally {
+      setProcessingAction('')
+    }
+  }
+
+  async function convertLead() {
+    if (!lead) return
+    setProcessingAction('convert')
+    setActionError('')
+    try {
+      const result = await api.leads.convert(lead.id)
+      window.location.hash = `#/clients/${result.organization.id}`
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Impossible de convertir ce prospect en client.')
+    } finally {
+      setProcessingAction('')
+    }
+  }
 
   if (error) return <ErrorText error={error} />
   if (!lead) return <p>Chargement…</p>
@@ -479,22 +536,16 @@ export function LeadDetailPage({ id, user }: { id: string; user: User }) {
         {lead.companyName ?? 'Sans entreprise'} · {lead.email ?? 'sans e-mail'} · {lead.phone ?? 'sans téléphone'}
       </p>
       <p>Score : {lead.score} · Source : {lead.source}</p>
+      {actionError && <p role="alert" className="form-error">{actionError}</p>}
       <div className="actions">
         {can(user, 'lead', 'update') && lead.status !== 'CONVERTED' && (
-          <button type="button" onClick={() => void api.leads.qualify(lead.id).then(setLead)}>
-            Qualifier
+          <button type="button" disabled={Boolean(processingAction)} aria-busy={processingAction === 'qualify' || undefined} onClick={() => void qualifyLead()}>
+            {processingAction === 'qualify' && <span className="button-spinner" aria-hidden="true" />}{processingAction === 'qualify' ? 'Qualification…' : 'Qualifier'}
           </button>
         )}
         {can(user, 'lead', 'convert') && lead.status !== 'CONVERTED' && (
-          <button
-            type="button"
-            onClick={() =>
-              void api.leads.convert(lead.id).then((res) => {
-                window.location.hash = `#/clients/${res.organization.id}`
-              })
-            }
-          >
-            Convertir en client
+          <button type="button" disabled={Boolean(processingAction)} aria-busy={processingAction === 'convert' || undefined} onClick={() => void convertLead()}>
+            {processingAction === 'convert' && <span className="button-spinner" aria-hidden="true" />}{processingAction === 'convert' ? 'Conversion…' : 'Convertir en client'}
           </button>
         )}
       </div>
@@ -589,9 +640,12 @@ export function ClientsPage({ user }: { user: User }) {
 
 export function ClientFormPage() {
   const [error, setError] = useState<unknown>(null)
+  const [saving, setSaving] = useState(false)
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
+    setSaving(true)
+    setError(null)
     try {
       const org = await api.organizations.create({
         name: String(form.get('name')),
@@ -603,6 +657,8 @@ export function ClientFormPage() {
       window.location.hash = `#/clients/${org.id}`
     } catch (err) {
       setError(err)
+    } finally {
+      setSaving(false)
     }
   }
   return (
@@ -627,7 +683,7 @@ export function ClientFormPage() {
         </label>
         <div className="form-actions">
           <a href="#/clients" className="btn-secondary">Annuler</a>
-          <button type="submit">Enregistrer</button>
+          <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Enregistrement…' : 'Enregistrer'}</button>
         </div>
       </form>
     </>
@@ -734,6 +790,7 @@ export function ContactsPage({ user }: { user: User }) {
 export function ContactFormPage() {
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [error, setError] = useState<unknown>(null)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     void api.organizations.list().then(setOrgs)
@@ -742,6 +799,8 @@ export function ContactFormPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
+    setSaving(true)
+    setError(null)
     try {
       const contact = await api.contacts.create({
         firstName: String(form.get('firstName')),
@@ -754,6 +813,8 @@ export function ContactFormPage() {
       window.location.hash = `#/contacts/${contact.id}`
     } catch (err) {
       setError(err)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -792,7 +853,7 @@ export function ContactFormPage() {
         </label>
         <div className="form-actions">
           <a href="#/contacts" className="btn-secondary">Annuler</a>
-          <button type="submit">Enregistrer</button>
+          <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Enregistrement…' : 'Enregistrer'}</button>
         </div>
       </form>
     </>
@@ -1092,7 +1153,8 @@ const body: CreateOpportunityDto = {
           {loadingOrganizations && <small>Chargement des organisations…</small>}
         </label>
         <div className="form-actions">
-          <button type="submit" disabled={saving || loadingOrganizations}>
+          <button type="submit" disabled={saving || loadingOrganizations} aria-busy={saving || undefined}>
+            {saving && <span className="button-spinner" aria-hidden="true" />}
             {saving ? 'Enregistrement…' : "Enregistrer l'opportunité"}
           </button>
         </div>

@@ -41,6 +41,7 @@ export function TasksPage({ user }: { user: User }) {
   const [refresh, setRefresh] = useState(0)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [archivingId, setArchivingId] = useState('')
 
   useEffect(() => {
     let active = true
@@ -101,11 +102,14 @@ export function TasksPage({ user }: { user: User }) {
   async function remove(task: CrmTask) {
     if (!window.confirm(`Archiver la tâche « ${task.title} » ?`)) return
     setError('')
+    setArchivingId(task.id)
     try {
       await api.tasks.delete(task.id)
       setRefresh((value) => value + 1)
     } catch (err) {
       setError(messageOf(err))
+    } finally {
+      setArchivingId('')
     }
   }
 
@@ -150,7 +154,7 @@ export function TasksPage({ user }: { user: User }) {
               </label>
             )}
           </div>
-          <button type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Créer la tâche'}</button>
+          <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Enregistrement…' : 'Créer la tâche'}</button>
         </form>
       )}
 
@@ -180,7 +184,7 @@ export function TasksPage({ user }: { user: User }) {
                   </select>
                 </label>
               )}
-              {can(user, 'task', 'delete') && <button type="button" className="linkish" onClick={() => void remove(task)}>Archiver</button>}
+              {can(user, 'task', 'delete') && <button type="button" className="linkish" disabled={Boolean(archivingId)} aria-busy={archivingId === task.id || undefined} onClick={() => void remove(task)}>{archivingId === task.id && <span className="button-spinner" aria-hidden="true" />} {archivingId === task.id ? 'Archivage…' : 'Archiver'}</button>}
             </div>
           </article>
         ))}
@@ -241,6 +245,7 @@ export function CalendarPage({ user }: { user: User }) {
   const [refresh, setRefresh] = useState(0)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [archivingId, setArchivingId] = useState('')
   const range = getCalendarRange(anchor, view)
 
   useEffect(() => {
@@ -296,11 +301,14 @@ export function CalendarPage({ user }: { user: User }) {
   async function remove(event: CalendarEvent) {
     if (!window.confirm(`Archiver l’événement « ${event.title} » ?`)) return
     setError('')
+    setArchivingId(event.id)
     try {
       await api.calendar.delete(event.id)
       setRefresh((value) => value + 1)
     } catch (err) {
       setError(messageOf(err))
+    } finally {
+      setArchivingId('')
     }
   }
 
@@ -350,7 +358,7 @@ export function CalendarPage({ user }: { user: User }) {
               <label className="stack">Responsable<select name="ownerUserId" defaultValue={user.id}>{users.filter((entry) => entry.isActive).map((entry) => <option key={entry.id} value={entry.id}>{entry.firstName} {entry.lastName}</option>)}</select></label>
             )}
           </div>
-          <button type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Ajouter à l’agenda'}</button>
+          <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Enregistrement…' : 'Ajouter à l’agenda'}</button>
         </form>
       )}
 
@@ -371,7 +379,7 @@ export function CalendarPage({ user }: { user: User }) {
                   {can(user, 'calendar', 'update') && (
                     <label><span className="sr-only">État de {event.title}</span><select value={event.status} onChange={(input) => void setStatus(event, input.target.value as CalendarEventStatus)}><option value="SCHEDULED">Planifié</option><option value="COMPLETED">Terminé</option><option value="CANCELLED">Annulé</option></select></label>
                   )}
-                  {can(user, 'calendar', 'delete') && <button type="button" className="linkish" onClick={() => void remove(event)}>Archiver</button>}
+                  {can(user, 'calendar', 'delete') && <button type="button" className="linkish" disabled={Boolean(archivingId)} aria-busy={archivingId === event.id || undefined} onClick={() => void remove(event)}>{archivingId === event.id && <span className="button-spinner" aria-hidden="true" />} {archivingId === event.id ? 'Archivage…' : 'Archiver'}</button>}
                 </div>
               </article>
             ))}

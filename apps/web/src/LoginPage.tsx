@@ -13,6 +13,8 @@ function errorMessage(error: unknown): string {
         'L’administrateur doit configurer APP_ORIGIN avec l’adresse publique de l’interface.'
       )
     }
+    if (error.status === 429) return 'Trop de tentatives. Réessayez dans une minute.'
+    if (error.status === 503) return error.message
   }
   return describeServerError(error)
 }
@@ -87,7 +89,8 @@ export function LoginPage() {
             {error}
           </p>
         )}
-        <button type="submit" disabled={submitting}>
+        <button type="submit" disabled={submitting} aria-busy={submitting || undefined}>
+          {submitting && <span className="button-spinner" aria-hidden="true" />}
           {submitting ? 'Connexion…' : 'Se connecter'}
         </button>
       </form>

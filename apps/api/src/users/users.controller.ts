@@ -8,11 +8,17 @@ import {
   Param,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
-import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import {
+  CreateBulkInvitationsDto,
+  CreateInvitationDto,
+  UpdateUserDto,
+} from './dto/user.dto';
 import { UsersService } from './users.service';
 
 @Controller('users')
@@ -25,6 +31,40 @@ export class UsersController {
     return this.users.list();
   }
 
+  @Get('invitations')
+  @RequirePermission('user', 'read')
+  listInvitations() {
+    return this.users.listInvitations();
+  }
+
+  @Get('invitation-email-index')
+  @RequirePermission('user', 'read')
+  invitationEmailIndex() {
+    return this.users.invitationEmailIndex();
+  }
+
+  @Post('bulk-invitations')
+  @RequirePermission('user', 'create')
+  @HttpCode(HttpStatus.CREATED)
+  createInvitations(
+    @Body() dto: CreateBulkInvitationsDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.users.createInvitations(dto.emails, dto.roleId, user.id, req.get('origin'));
+  }
+
+  @Post('invitations/:id/resend')
+  @RequirePermission('user', 'create')
+  @HttpCode(HttpStatus.OK)
+  resendInvitation(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.users.resendInvitation(id, user.id, req.get('origin'));
+  }
+
   @Get(':id')
   @RequirePermission('user', 'read')
   findById(@Param('id') id: string) {
@@ -34,8 +74,12 @@ export class UsersController {
   @Post()
   @RequirePermission('user', 'create')
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateUserDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.users.create(dto, user.id);
+  create(
+    @Body() dto: CreateInvitationDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.users.createInvitation(dto, user.id, req.get('origin'));
   }
 
   @Patch(':id')

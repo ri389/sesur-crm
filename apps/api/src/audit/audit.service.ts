@@ -28,19 +28,29 @@ export class AuditService {
     await this.prisma.auditLog.create({ data: entry });
   }
 
-  list(params: { action?: string; entityType?: string }) {
-    return this.prisma.auditLog.findMany({
+  async list(params: { action?: string; entityType?: string }) {
+    const rows = await this.prisma.auditLog.findMany({
       where: {
         ...(params.action ? { action: { contains: params.action } } : {}),
         ...(params.entityType ? { entityType: params.entityType } : {}),
       },
       orderBy: { occurredAt: 'desc' },
       take: 150,
-      include: {
-        actor: {
-          select: { id: true, email: true, firstName: true, lastName: true },
-        },
-      },
     });
+    const actorIds = [
+      ...new Set(rows.map((row) => row.actorUserId).filter((id): id is string => Boolean(id))),
+    ];
+    const actors = actorIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: actorIds } },
+          select: { id: true, email: true, firstName: true, lastName: true },
+        })
+      : [];
+    const actorsById = new Map(actors.map((actor) => [actor.id, actor]));
+
+    return rows.map((row) => ({
+      ...row,
+      actor: row.actorUserId ? (actorsById.get(row.actorUserId) ?? null) : null,
+    }));
   }
 }

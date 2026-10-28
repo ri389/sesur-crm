@@ -4,10 +4,11 @@ import { TeamsController } from './teams.controller';
 import { TeamsService } from './teams.service';
 import { RolesController, UsersController } from './users.controller';
 import { UsersService } from './users.service';
+import { EmailService } from './email.service';
 
 @Module({
   imports: [AuthModule],
   controllers: [UsersController, RolesController, TeamsController],
-  providers: [UsersService, TeamsService],
+  providers: [UsersService, TeamsService, EmailService],
 })
 export class UsersModule {}

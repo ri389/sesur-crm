@@ -28,31 +28,40 @@ model Team {
 }
 
 model User {
-  id                   String        @id @default(uuid(7)) @db.Uuid
+  id                   String          @id @default(uuid(7)) @db.Uuid
   /// Normalisé en minuscules par l'application avant écriture.
-  email                String        @unique
-  firstName            String        @map("first_name")
-  lastName             String        @map("last_name")
+  email                String          @unique
+  firstName            String          @map("first_name")
+  lastName             String          @map("last_name")
   /// Argon2id ; null tant que le compte n'a pas défini son mot de passe.
-  passwordHash         String?       @map("password_hash")
-  isActive             Boolean       @default(true) @map("is_active")
-  failedLoginCount     Int           @default(0) @map("failed_login_count")
-  lockedUntil          DateTime?     @map("locked_until") @db.Timestamptz(3)
-  lastLoginAt          DateTime?     @map("last_login_at") @db.Timestamptz(3)
-  teamId               String?       @map("team_id") @db.Uuid
-  team                 Team?         @relation("TeamMembers", fields: [teamId], references: [id])
-  managerId            String?       @map("manager_id") @db.Uuid
-  manager              User?         @relation("UserManager", fields: [managerId], references: [id])
-  directReports        User[]        @relation("UserManager")
-  managedTeams         Team[]        @relation("TeamManager")
+  passwordHash         String?         @map("password_hash")
+  totpSecretEncrypted  String?         @map("totp_secret_encrypted")
+  totpEnabled          Boolean         @default(false) @map("totp_enabled")
+  totpEnabledAt        DateTime?       @map("totp_enabled_at") @db.Timestamptz(3)
+  totpLastCounter      BigInt?         @map("totp_last_counter")
+  authMethod           AuthMethod      @default(TOTP) @map("auth_method")
+  whatsappPhone        String?         @map("whatsapp_phone")
+  whatsappEnabled      Boolean         @default(false) @map("whatsapp_enabled")
+  whatsappEnabledAt    DateTime?       @map("whatsapp_enabled_at") @db.Timestamptz(3)
+  isActive             Boolean         @default(true) @map("is_active")
+  failedLoginCount     Int             @default(0) @map("failed_login_count")
+  lockedUntil          DateTime?       @map("locked_until") @db.Timestamptz(3)
+  lastLoginAt          DateTime?       @map("last_login_at") @db.Timestamptz(3)
+  teamId               String?         @map("team_id") @db.Uuid
+  team                 Team?           @relation("TeamMembers", fields: [teamId], references: [id])
+  managerId            String?         @map("manager_id") @db.Uuid
+  manager              User?           @relation("UserManager", fields: [managerId], references: [id])
+  directReports        User[]          @relation("UserManager")
+  managedTeams         Team[]          @relation("TeamManager")
   roles                UserRole[]
-  auditLogs            AuditLog[]
   sessions             Session[]
-  assignedLeads        Lead[]        @relation("AssignedLeads")
-  authoredInteractions Interaction[] @relation("AuthoredInteractions")
-  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt            DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
-  deletedAt            DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  authChallenges       AuthChallenge[]
+  sentInvitations      Invitation[]    @relation("InvitationSender")
+  assignedLeads        Lead[]          @relation("AssignedLeads")
+  authoredInteractions Interaction[]   @relation("AuthoredInteractions")
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt            DateTime?       @map("deleted_at") @db.Timestamptz(3)
 
   // Lot 2 : opportunités commerciales
   ownedOpportunities   Opportunity[] @relation("OpportunityOwner")
@@ -95,6 +104,7 @@ model Role {
   isSystem    Boolean          @default(false) @map("is_system")
   users       UserRole[]
   permissions RolePermission[]
+  invitations Invitation[]
   createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -158,13 +168,58 @@ model Session {
   @@map("user_session")
 }
 
+enum AuthChallengeType {
+  ENROLL_TOTP
+  LOGIN_TOTP
+  ENROLL_WHATSAPP
+  LOGIN_WHATSAPP
+}
+
+enum AuthMethod {
+  TOTP
+  WHATSAPP
+}
+
+/// Jeton temporaire, à usage unique, délivré après validation du mot de passe.
+model AuthChallenge {
+  id         String            @id @default(uuid(7)) @db.Uuid
+  tokenHash  String            @unique @map("token_hash")
+  userId     String            @map("user_id") @db.Uuid
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       AuthChallengeType
+  codeHash   String?           @map("code_hash")
+  attempts   Int               @default(0)
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt  DateTime          @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime?         @map("consumed_at") @db.Timestamptz(3)
+
+  @@index([userId, expiresAt])
+  @@map("auth_challenge")
+}
+
+/// Invitation à créer un compte ; seul le hachage du jeton est conservé.
+model Invitation {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  email           String
+  tokenHash       String    @unique @map("token_hash")
+  roleId          String    @map("role_id") @db.Uuid
+  role            Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  invitedByUserId String    @map("invited_by_user_id") @db.Uuid
+  invitedBy       User      @relation("InvitationSender", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(3)
+  acceptedAt      DateTime? @map("accepted_at") @db.Timestamptz(3)
+
+  @@index([email, expiresAt])
+  @@map("user_invitation")
+}
+
 /// Journal d'audit en ajout seul : UPDATE et DELETE sont refusés par un trigger.
 /// Ne jamais y stocker de mot de passe, jeton ou secret.
 model AuditLog {
   id          String   @id @default(uuid(7)) @db.Uuid
   occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz(3)
   actorUserId String?  @map("actor_user_id") @db.Uuid
-  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
   action      String
   entityType  String   @map("entity_type")
   entityId    String?  @map("entity_id") @db.Uuid

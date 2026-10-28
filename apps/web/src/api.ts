@@ -14,6 +14,54 @@ export interface User {
   permissions: PermissionGrant[]
 }
 
+export interface TotpChallenge {
+  step: 'enroll_totp' | 'verify_totp' | 'enroll_whatsapp' | 'verify_whatsapp'
+  challengeToken: string
+  email: string
+  provisioningUri?: string
+  maskedPhone?: string
+}
+
+export interface InvitationDetails {
+  email: string
+  roleName: string
+}
+
+export type InvitationStatus = 'approved' | 'expired' | 'pending'
+
+export interface InvitationRecord {
+  id: string
+  email: string
+  createdAt: string
+  expiresAt: string
+  acceptedAt: string | null
+  status: InvitationStatus
+  role: { id: string; name: string }
+}
+
+export interface InvitationEmailIndex {
+  registered: string[]
+  pending: string[]
+}
+
+export interface BulkInvitationResult {
+  email: string
+  success: boolean
+  expiresAt?: string
+  error?: string
+}
+
+export interface RegistrationDraft {
+  draftToken: string
+  firstName: string
+  lastName: string
+  passwordSaved: boolean
+  authMethod: 'TOTP' | 'WHATSAPP' | null
+  whatsappPhone: string
+  completedStep: 0 | 1 | 2 | 3
+  expiresAt: string
+}
+
 export interface DuplicateCandidate {
   id: string
   type: 'LEAD' | 'CONTACT' | 'ORGANIZATION'
@@ -480,7 +528,7 @@ export class ApiError extends Error {
 
 export class ApiUnreachableError extends Error {}
 
-const GATEWAY_STATUSES = [502, 503, 504]
+const GATEWAY_STATUSES = [502, 504]
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
@@ -518,12 +566,68 @@ export async function fetchCurrentUser(): Promise<User | null> {
   }
 }
 
-export async function login(email: string, password: string): Promise<User> {
-  const { user } = await request<{ user: User }>('/auth/login', {
+export async function login(email: string, password: string): Promise<TotpChallenge> {
+  return request<TotpChallenge>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   })
+}
+
+export async function verifyTotp(challengeToken: string, code: string): Promise<User> {
+  const { user } = await request<{ user: User }>('/auth/verify-code', {
+    method: 'POST',
+    body: JSON.stringify({ challengeToken, code }),
+  })
   return user
+}
+
+export async function validateInvitation(token: string): Promise<InvitationDetails> {
+  return request<InvitationDetails>('/auth/invitations/validate', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  })
+}
+
+export async function registerWithInvitation(body: {
+  token: string
+  draftToken?: string
+  firstName?: string
+  lastName?: string
+  password?: string
+  confirmPassword?: string
+  authMethod?: 'TOTP' | 'WHATSAPP'
+  whatsappPhone?: string
+}): Promise<TotpChallenge> {
+  return request<TotpChallenge>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function createOrResumeRegistrationDraft(
+  invitationToken: string,
+  draftToken?: string,
+): Promise<RegistrationDraft> {
+  return request<RegistrationDraft>('/auth/registration-drafts', {
+    method: 'POST',
+    body: JSON.stringify({ invitationToken, ...(draftToken ? { draftToken } : {}) }),
+  })
+}
+
+export async function saveRegistrationDraft(body: {
+  draftToken: string
+  step: 'identity' | 'password' | 'security'
+  firstName?: string
+  lastName?: string
+  password?: string
+  confirmPassword?: string
+  authMethod?: 'TOTP' | 'WHATSAPP'
+  whatsappPhone?: string
+}): Promise<RegistrationDraft> {
+  return request<RegistrationDraft>('/auth/registration-drafts/save', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 export async function logout(): Promise<void> {
@@ -591,8 +695,23 @@ export const api = {
   },
   users: {
     list: () => request<DirectoryUser[]>('/users'),
-    create: (body: Record<string, unknown>) =>
-      request<DirectoryUser>('/users', { method: 'POST', body: JSON.stringify(body) }),
+    invitations: () => request<InvitationRecord[]>('/users/invitations'),
+    invitationEmailIndex: () => request<InvitationEmailIndex>('/users/invitation-email-index'),
+    create: (body: { email: string; roleId: string }) =>
+      request<{ email: string; role: { id: string; name: string }; expiresAt: string }>(
+        '/users',
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    createMany: (body: { emails: string[]; roleId: string }) =>
+      request<BulkInvitationResult[]>('/users/bulk-invitations', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    resendInvitation: (id: string) =>
+      request<{ email: string; role: { id: string; name: string }; expiresAt: string }>(
+        `/users/invitations/${id}/resend`,
+        { method: 'POST' },
+      ),
     update: (id: string, body: Record<string, unknown>) =>
       request<DirectoryUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),

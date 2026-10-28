@@ -300,7 +300,8 @@ export function QuoteFormPage({ user }: { user: User }) {
         <p>Le total définitif sera calculé par le serveur lors de l'enregistrement.</p>
 
         <div>
-          <button type="submit" disabled={saving}>
+          <button type="submit" disabled={saving} aria-busy={saving || undefined}>
+            {saving && <span className="button-spinner" aria-hidden="true" />}
             {saving ? 'Enregistrement...' : 'Créer le devis'}
           </button>
           {' '}
@@ -322,6 +323,7 @@ export function QuoteDetailPage({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [processing, setProcessing] = useState(false)
+  const [processingAction, setProcessingAction] = useState<'submit' | 'approve' | 'reject' | null>(null)
   const [comments, setComments] = useState('')
   const [actionMessage, setActionMessage] = useState('')
 
@@ -355,6 +357,7 @@ export function QuoteDetailPage({
     if (!quote || processing) return
 
     setProcessing(true)
+    setProcessingAction(action)
     setError('')
     setActionMessage('')
 
@@ -397,6 +400,7 @@ export function QuoteDetailPage({
       )
     } finally {
       setProcessing(false)
+      setProcessingAction(null)
     }
   }
 
@@ -443,7 +447,8 @@ export function QuoteDetailPage({
                   disabled={processing}
                   onClick={() => void handleQuoteAction('submit')}
                 >
-                  {processing ? 'Traitement...' : 'Soumettre à validation'}
+                  {processingAction === 'submit' && <span className="button-spinner" aria-hidden="true" />}
+                  {processingAction === 'submit' ? 'Traitement...' : 'Soumettre à validation'}
                 </button>
               </p>
             )}
@@ -470,7 +475,8 @@ export function QuoteDetailPage({
                     disabled={processing}
                     onClick={() => void handleQuoteAction('approve')}
                   >
-                    Approuver
+                    {processingAction === 'approve' && <span className="button-spinner" aria-hidden="true" />}
+                    {processingAction === 'approve' ? 'Approbation…' : 'Approuver'}
                   </button>
 
                   <button
@@ -478,7 +484,8 @@ export function QuoteDetailPage({
                     disabled={processing || !comments.trim()}
                     onClick={() => void handleQuoteAction('reject')}
                   >
-                    Rejeter
+                    {processingAction === 'reject' && <span className="button-spinner" aria-hidden="true" />}
+                    {processingAction === 'reject' ? 'Rejet…' : 'Rejeter'}
                   </button>
                 </div>
               </div>
@@ -858,7 +865,8 @@ export function QuoteEditPage({
         </p>
         <p>Le montant définitif sera recalculé par le serveur.</p>
 
-        <button type="submit" disabled={saving}>
+        <button type="submit" disabled={saving} aria-busy={saving || undefined}>
+          {saving && <span className="button-spinner" aria-hidden="true" />}
           {saving ? 'Enregistrement...' : 'Enregistrer les modifications'}
         </button>
       </form>

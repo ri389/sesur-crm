@@ -92,7 +92,7 @@ export function IntegrationsPage({ user }: { user: User }) {
               {delivery.lastError && <p className="form-error">{delivery.lastError}</p>}
               {delivery.attempts.map((attempt) => <small className="activity-meta" key={`${delivery.id}-${attempt.attempt}`}>Tentative {attempt.attempt} · {dateLabel(attempt.occurredAt)} · {attempt.succeeded ? 'réussie' : attempt.error ?? `HTTP ${attempt.statusCode ?? '—'}`}</small>)}
             </div>
-            {delivery.status === 'DEAD' && can(user, 'integration', 'replay') && <button type="button" className="btn-secondary" disabled={busyId === delivery.id} onClick={() => void replay(delivery.id)}>{busyId === delivery.id ? 'Relance…' : 'Rejouer'}</button>}
+            {delivery.status === 'DEAD' && can(user, 'integration', 'replay') && <button type="button" className="btn-secondary" disabled={busyId === delivery.id} aria-busy={busyId === delivery.id || undefined} onClick={() => void replay(delivery.id)}>{busyId === delivery.id && <span className="button-spinner" aria-hidden="true" />} {busyId === delivery.id ? 'Relance…' : 'Rejouer'}</button>}
           </article>
         ))}
       </section>

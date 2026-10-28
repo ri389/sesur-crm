@@ -10,7 +10,7 @@ const ARGON2_OPTIONS = {
   parallelism: 4,
 } as const;
 
-export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 128;
 
 @Injectable()
@@ -47,6 +47,11 @@ export class PasswordService {
     }
     if (password.length > PASSWORD_MAX_LENGTH) {
       problems.push(`au plus ${PASSWORD_MAX_LENGTH} caractères`);
+    }
+    if (!/\d/u.test(password)) problems.push('au moins un chiffre');
+    if (!/\p{Lu}/u.test(password)) problems.push('au moins une lettre majuscule');
+    if (!/[^\p{L}\p{N}]/u.test(password)) {
+      problems.push('au moins un caractère spécial');
     }
     if (email && password.trim().toLowerCase() === email.trim().toLowerCase()) {
       problems.push("différent de l'adresse e-mail");

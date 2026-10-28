@@ -2,48 +2,35 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 
-export class CreateUserDto {
+export class CreateInvitationDto {
   @IsEmail()
   @MaxLength(254)
   email!: string;
 
-  @IsString()
-  @MaxLength(100)
-  firstName!: string;
-
-  @IsString()
-  @MaxLength(100)
-  lastName!: string;
-
-  @IsOptional()
   @IsUUID()
-  teamId?: string;
+  roleId!: string;
+}
 
-  @IsOptional()
-  @IsUUID()
-  managerId?: string;
-
-  @IsOptional()
+export class CreateBulkInvitationsDto {
   @IsArray()
-  @IsUUID(undefined, { each: true })
-  roleIds?: string[];
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ArrayUnique((email: string) => email.trim().toLowerCase())
+  @IsEmail({}, { each: true })
+  @MaxLength(254, { each: true })
+  emails!: string[];
 
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-
-  @IsOptional()
-  @IsString()
-  @MinLength(12)
-  @MaxLength(128)
-  password?: string;
+  @IsUUID()
+  roleId!: string;
 }
 
 export class UpdateUserDto {

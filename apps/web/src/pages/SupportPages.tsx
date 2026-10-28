@@ -97,6 +97,7 @@ export function TicketsPage({ user }: { user: User }) {
   const [refresh, setRefresh] = useState(0)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [archivingId, setArchivingId] = useState('')
 
   useEffect(() => {
     if (!can(user, 'organization', 'read')) return
@@ -162,6 +163,19 @@ export function TicketsPage({ user }: { user: User }) {
     }
   }
 
+  async function archiveTicket(ticket: SupportTicket) {
+    if (!window.confirm(`Archiver le ticket ${ticket.number} ?`)) return
+    setArchivingId(ticket.id)
+    try {
+      await api.tickets.delete(ticket.id)
+      setRefresh((value) => value + 1)
+    } catch (err) {
+      setError(messageOf(err))
+    } finally {
+      setArchivingId('')
+    }
+  }
+
   if (!can(user, 'ticket', 'read')) return <p role="alert">Vous n’avez pas accès aux tickets SAV.</p>
 
   return (
@@ -186,7 +200,7 @@ export function TicketsPage({ user }: { user: User }) {
             <label className="stack">Échéance de résolution<input name="slaResolutionDueAt" type="datetime-local" /></label>
           </div>
           <small>Sans date personnalisée, l’échéance est calculée automatiquement selon la priorité (délais 24 h/24).</small>
-          <button type="submit" disabled={saving}>{saving ? 'Création…' : 'Créer le ticket'}</button>
+          <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Création…' : 'Créer le ticket'}</button>
         </form>
       )}
 
@@ -227,7 +241,7 @@ export function TicketsPage({ user }: { user: User }) {
             </div>
             <div className="activity-actions">
               {can(user, 'ticket', 'update') && <label><span className="sr-only">État de {ticket.number}</span><select value={ticket.status} onChange={(event) => void api.tickets.update(ticket.id, { status: event.target.value as TicketStatus }).then(() => setRefresh((value) => value + 1)).catch((err: unknown) => setError(messageOf(err)))}>{(['OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'RESOLVED', 'CLOSED'] as const).map((item) => <option key={item} value={item}>{ticketStatusLabel(item)}</option>)}</select></label>}
-              {can(user, 'ticket', 'delete') && <button className="linkish" type="button" onClick={() => { if (window.confirm(`Archiver le ticket ${ticket.number} ?`)) void api.tickets.delete(ticket.id).then(() => setRefresh((value) => value + 1)).catch((err: unknown) => setError(messageOf(err))) }}>Archiver</button>}
+              {can(user, 'ticket', 'delete') && <button className="linkish" type="button" disabled={Boolean(archivingId)} aria-busy={archivingId === ticket.id || undefined} onClick={() => void archiveTicket(ticket)}>{archivingId === ticket.id && <span className="button-spinner" aria-hidden="true" />} {archivingId === ticket.id ? 'Archivage…' : 'Archiver'}</button>}
             </div>
           </article>
         ))}
@@ -252,6 +266,7 @@ export function TicketDetailPage({ id, user }: { id: string; user: User }) {
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [saving, setSaving] = useState(false)
+  const [processingAction, setProcessingAction] = useState('')
 
   useEffect(() => {
     let active = true
@@ -298,6 +313,19 @@ export function TicketDetailPage({ id, user }: { id: string; user: User }) {
     }
   }
 
+  async function toggleEscalation() {
+    setProcessingAction('escalate')
+    setError('')
+    try {
+      await api.tickets.setEscalated(id, !ticket?.escalatedAt)
+      setRefresh((value) => value + 1)
+    } catch (err) {
+      setError(messageOf(err))
+    } finally {
+      setProcessingAction('')
+    }
+  }
+
   if (error && !ticket) return <><p role="alert" className="form-error">{error}</p><a href="#/sav/tickets">Retour à la file</a></>
   if (!ticket) return <p>Chargement du ticket…</p>
 
@@ -336,18 +364,18 @@ export function TicketDetailPage({ id, user }: { id: string; user: User }) {
                 <label className="stack">Première réponse<input name="slaResponseDueAt" type="datetime-local" defaultValue={localDateTime(ticket.slaResponseDueAt)} /></label>
                 <label className="stack">Résolution<input name="slaResolutionDueAt" type="datetime-local" defaultValue={localDateTime(ticket.slaResolutionDueAt)} /></label>
                 <small>Renseigner les dates et heures selon la politique SLA validée.</small>
-                <button type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Mettre à jour les échéances'}</button>
+                <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Enregistrement…' : 'Mettre à jour les échéances'}</button>
               </form>
             </>
           )}
-          {can(user, 'ticket', 'escalate') && <button type="button" className={ticket.escalatedAt ? 'btn-secondary' : 'btn-warning'} onClick={() => void api.tickets.setEscalated(id, !ticket.escalatedAt).then(() => setRefresh((value) => value + 1)).catch((err: unknown) => setError(messageOf(err)))}>{ticket.escalatedAt ? 'Lever l’escalade' : 'Escalader le ticket'}</button>}
+          {can(user, 'ticket', 'escalate') && <button type="button" className={ticket.escalatedAt ? 'btn-secondary' : 'btn-warning'} disabled={Boolean(processingAction) || saving} aria-busy={processingAction === 'escalate' || undefined} onClick={() => void toggleEscalation()}>{processingAction === 'escalate' && <span className="button-spinner" aria-hidden="true" />} {processingAction === 'escalate' ? 'Mise à jour…' : ticket.escalatedAt ? 'Lever l’escalade' : 'Escalader le ticket'}</button>}
         </section>
       </div>
 
       <section className="detail-section">
         <h3>Commentaires et compte rendu</h3>
         {ticket.comments?.length ? <div className="support-comments">{ticket.comments.map((comment) => <article key={comment.id}><p>{comment.body}</p><small>{comment.author.firstName} {comment.author.lastName} · {dateLabel(comment.createdAt)}</small></article>)}</div> : <p>Aucun commentaire.</p>}
-        {can(user, 'ticket', 'comment') && <form className="form-grid" onSubmit={(event) => void submitComment(event)}><label className="stack">Ajouter un commentaire<textarea name="body" required maxLength={10000} rows={3} /></label><button type="submit" disabled={saving}>{saving ? 'Envoi…' : 'Ajouter'}</button></form>}
+        {can(user, 'ticket', 'comment') && <form className="form-grid" onSubmit={(event) => void submitComment(event)}><label className="stack">Ajouter un commentaire<textarea name="body" required maxLength={10000} rows={3} /></label><button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Envoi…' : 'Ajouter'}</button></form>}
       </section>
 
       <section className="detail-section">
@@ -386,6 +414,7 @@ export function ContractsPage({ user }: { user: User }) {
   const [refresh, setRefresh] = useState(0)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [archivingId, setArchivingId] = useState('')
 
   useEffect(() => {
     if (!can(user, 'organization', 'read')) return
@@ -436,6 +465,19 @@ export function ContractsPage({ user }: { user: User }) {
     }
   }
 
+  async function archiveContract(contract: ContractRecord) {
+    if (!window.confirm(`Archiver le contrat ${contract.number} ?`)) return
+    setArchivingId(contract.id)
+    try {
+      await api.contracts.delete(contract.id)
+      setRefresh((value) => value + 1)
+    } catch (err) {
+      setError(messageOf(err))
+    } finally {
+      setArchivingId('')
+    }
+  }
+
   if (!can(user, 'contract', 'read')) return <p role="alert">Vous n’avez pas accès aux contrats.</p>
   return (
     <>
@@ -455,7 +497,7 @@ export function ContractsPage({ user }: { user: User }) {
           <label className="stack">Début *<input name="startsAt" type="date" required /></label>
           <label className="stack">Fin / échéance *<input name="expiresAt" type="date" required /></label>
         </div>
-        <button type="submit" disabled={saving || organizations.length === 0}>{saving ? 'Création…' : 'Créer le contrat'}</button>
+        <button type="submit" disabled={saving || organizations.length === 0} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Création…' : 'Créer le contrat'}</button>
       </form>}
 
       <section className="filters" aria-label="Filtres des contrats">
@@ -482,7 +524,7 @@ export function ContractsPage({ user }: { user: User }) {
             </div>
             <div className="activity-actions">
               {can(user, 'contract', 'update') && <label><span className="sr-only">État de {contract.number}</span><select value={contract.status} onChange={(event) => void api.contracts.update(contract.id, { status: event.target.value as ContractStatus }).then(() => setRefresh((value) => value + 1)).catch((err: unknown) => setError(messageOf(err)))}><option value="ACTIVE">Actif</option><option value="TERMINATED">Résilié</option></select></label>}
-              {can(user, 'contract', 'delete') && <button className="linkish" type="button" onClick={() => { if (window.confirm(`Archiver le contrat ${contract.number} ?`)) void api.contracts.delete(contract.id).then(() => setRefresh((value) => value + 1)).catch((err: unknown) => setError(messageOf(err))) }}>Archiver</button>}
+              {can(user, 'contract', 'delete') && <button className="linkish" type="button" disabled={Boolean(archivingId)} aria-busy={archivingId === contract.id || undefined} onClick={() => void archiveContract(contract)}>{archivingId === contract.id && <span className="button-spinner" aria-hidden="true" />} {archivingId === contract.id ? 'Archivage…' : 'Archiver'}</button>}
             </div>
           </article>
         ))}

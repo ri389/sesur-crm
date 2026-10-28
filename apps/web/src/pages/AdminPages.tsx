@@ -1,28 +1,152 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { api, can, type AuditRow, type DirectoryUser, type Product, type Role, type User } from '../api'
+import { api, can, type AuditRow, type DirectoryUser, type InvitationEmailIndex, type InvitationRecord, type Product, type Role, type User } from '../api'
 import { changePassword } from '../api'
+
+function invitationEmailsFromInput(value: string): string[] {
+  return value.split(/[\s,;]+/u).map((email) => email.trim().toLowerCase()).filter(Boolean)
+}
+
+function validateInvitationEmails(value: string, index: InvitationEmailIndex): string {
+  const emails = invitationEmailsFromInput(value)
+  if (emails.length === 0) return value.trim() ? 'Saisissez au moins une adresse e-mail.' : ''
+  if (emails.length > 50) return 'Vous pouvez envoyer jusqu’à 50 invitations à la fois.'
+  const invalid = emails.filter((email) => {
+    const input = document.createElement('input')
+    input.type = 'email'
+    input.value = email
+    return !input.checkValidity()
+  })
+  if (invalid.length > 0) return `Adresse${invalid.length > 1 ? 's' : ''} invalide${invalid.length > 1 ? 's' : ''} : ${invalid.join(', ')}`
+  if (new Set(emails).size !== emails.length) return 'Une même adresse apparaît plusieurs fois dans la liste.'
+  const reserved = new Set([...index.registered, ...index.pending])
+  const used = emails.filter((email) => reserved.has(email))
+  return used.length > 0
+    ? `Adresse${used.length > 1 ? 's' : ''} déjà utilisée${used.length > 1 ? 's' : ''} ou invitée${used.length > 1 ? 's' : ''} : ${used.join(', ')}`
+    : ''
+}
 
 export function UsersPage({ user: currentUser }: { user: User }) {
   const [users, setUsers] = useState<DirectoryUser[]>([])
   const [roles, setRoles] = useState<Role[]>([])
+  const [invitations, setInvitations] = useState<InvitationRecord[]>([])
+  const [directoryLoaded, setDirectoryLoaded] = useState(false)
   const [editingUser, setEditingUser] = useState<DirectoryUser | null>(null)
+  const [formModalOpen, setFormModalOpen] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [invitationValidationError, setInvitationValidationError] = useState('')
+  const [invitationSentTo, setInvitationSentTo] = useState<string[]>([])
+  const [invitationEmails, setInvitationEmails] = useState('')
+  const [statusClock, setStatusClock] = useState(() => Date.now())
+  const [submitting, setSubmitting] = useState(false)
+  const [resendingId, setResendingId] = useState('')
+  const [removingUserId, setRemovingUserId] = useState('')
+  const closeConfirmationRef = useRef<HTMLButtonElement>(null)
+  const inviteButtonRef = useRef<HTMLButtonElement>(null)
+  const formCloseRef = useRef<HTMLButtonElement>(null)
+  const formDialogRef = useRef<HTMLElement>(null)
 
   const loadDirectory = useCallback(async () => {
-    const [nextUsers, nextRoles] = await Promise.all([api.users.list(), api.roles()])
+    const [nextUsers, nextRoles, nextInvitations] = await Promise.all([
+      api.users.list(),
+      api.roles(),
+      api.users.invitations(),
+    ])
     setUsers(nextUsers)
     setRoles(nextRoles)
+    setInvitations(nextInvitations)
+    setDirectoryLoaded(true)
+  }, [])
+
+  const closeConfirmation = useCallback(() => {
+    setInvitationSentTo([])
+    window.requestAnimationFrame(() => inviteButtonRef.current?.focus())
+  }, [])
+
+  function openInvitationForm() {
+    setEditingUser(null)
+    setInvitationEmails('')
+    setInvitationValidationError('')
+    setError('')
+    setNotice('')
+    setFormModalOpen(true)
+  }
+
+  function openUserEditor(userToEdit: DirectoryUser) {
+    setEditingUser(userToEdit)
+    setInvitationValidationError('')
+    setError('')
+    setNotice('')
+    setFormModalOpen(true)
+  }
+
+  function closeUserForm() {
+    if (submitting) return
+    setFormModalOpen(false)
+    setEditingUser(null)
+    setInvitationValidationError('')
+  }
+
+  useEffect(() => {
+    void loadDirectory().catch((reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : 'Impossible de charger les utilisateurs et les invitations.')
+    })
+  }, [loadDirectory])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setStatusClock(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
   }, [])
 
   useEffect(() => {
-    void loadDirectory()
-  }, [loadDirectory])
+    if (!formModalOpen) return
+    formCloseRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeUserForm()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = formDialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)',
+      )
+      if (!focusable?.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last?.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [formModalOpen, submitting])
+
+  useEffect(() => {
+    if (invitationSentTo.length === 0) return
+    closeConfirmationRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeConfirmation()
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        closeConfirmationRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [invitationSentTo, closeConfirmation])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const element = event.currentTarget
     const form = new FormData(element)
+    setSubmitting(true)
+    setError('')
+    setInvitationValidationError('')
     const fields = {
       firstName: String(form.get('firstName') ?? ''),
       lastName: String(form.get('lastName') ?? ''),
@@ -35,73 +159,147 @@ export function UsersPage({ user: currentUser }: { user: User }) {
           ...fields,
           isActive: form.get('isActive') === 'true',
         })
+        await loadDirectory()
+        setEditingUser(null)
+        setFormModalOpen(false)
+        setError('')
+        setNotice('Les modifications ont été enregistrées.')
+        element.reset()
       } else {
-        await api.users.create({
-          ...fields,
-          email: String(form.get('email') ?? ''),
-          password: String(form.get('password') ?? ''),
+        const emailInput = String(form.get('emails') ?? '')
+        const currentEmailIndex = await api.users.invitationEmailIndex()
+        const emailError = validateInvitationEmails(emailInput, currentEmailIndex)
+        if (emailError) {
+          setInvitationValidationError(emailError)
+          setSubmitting(false)
+          return
+        }
+        const emails = invitationEmailsFromInput(emailInput)
+
+        const result = await api.users.createMany({
+          emails,
+          roleId: String(form.get('roleId') ?? ''),
+        })
+        const delivered = result.filter((entry) => entry.success)
+        const failed = result.filter((entry) => !entry.success)
+        setEditingUser(null)
+        setNotice(failed.length > 0 ? `${delivered.length} invitation(s) envoyée(s) ; ${failed.length} échec(s).` : '')
+        setError(failed.map((entry) => `${entry.email} : ${entry.error}`).join(' · '))
+        setInvitationSentTo(delivered.map((entry) => entry.email))
+        if (delivered.length > 0) {
+          setInvitationEmails('')
+          element.reset()
+          setFormModalOpen(false)
+        }
+        void loadDirectory().catch(() => {
+          if (delivered.length > 0) setNotice(`${delivered.length} invitation(s) envoyée(s) ; la liste n’a pas pu être actualisée.`)
         })
       }
-      await loadDirectory()
-      setEditingUser(null)
-      setError('')
-      element.reset()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible d’enregistrer cet utilisateur.')
+      setNotice('')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function resendInvitation(invitation: InvitationRecord) {
+    setResendingId(invitation.id)
+    setError('')
+    setNotice('')
+    try {
+      await api.users.resendInvitation(invitation.id)
+      await loadDirectory()
+      setNotice(`Une nouvelle invitation a été envoyée à ${invitation.email}.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible de renvoyer cette invitation.')
+    } finally {
+      setResendingId('')
     }
   }
 
   async function remove(userToRemove: DirectoryUser) {
-    if (!window.confirm(`Supprimer le compte de ${userToRemove.firstName} ${userToRemove.lastName} ?`)) return
+    const confirmation = import.meta.env.DEV
+      ? `Supprimer définitivement le compte de ${userToRemove.firstName} ${userToRemove.lastName} ?\n\nLes invitations et accès liés seront supprimés. Les actions d’audit resteront conservées sous leur identifiant historique.`
+      : `Désactiver le compte de ${userToRemove.firstName} ${userToRemove.lastName} ?\n\nLe compte ne pourra plus se connecter et ses sessions seront révoquées.`
+    if (!window.confirm(confirmation)) return
+    setRemovingUserId(userToRemove.id)
     try {
       await api.users.delete(userToRemove.id)
       await loadDirectory()
       setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible de supprimer cet utilisateur.')
+    } finally {
+      setRemovingUserId('')
     }
   }
 
   const canEditForm = editingUser
     ? can(currentUser, 'user', 'update')
     : can(currentUser, 'user', 'create')
-
   return (
     <>
-      <h2>Utilisateurs</h2>
-      {canEditForm && (
-        <form className="form" key={editingUser?.id ?? 'new-user'} onSubmit={(e) => void submit(e)}>
-          <h3>{editingUser ? `Modifier ${editingUser.firstName} ${editingUser.lastName}` : 'Créer un utilisateur'}</h3>
-          <label>
-            Prénom <input name="firstName" defaultValue={editingUser?.firstName} required />
-          </label>
-          <label>
-            Nom <input name="lastName" defaultValue={editingUser?.lastName} required />
-          </label>
-          {!editingUser && (
+      <header className="page-header users-page-heading">
+        <div>
+          <h2>Utilisateurs</h2>
+          <p>Gérez les comptes, les rôles et les invitations de votre équipe.</p>
+        </div>
+        {can(currentUser, 'user', 'create') && <button ref={inviteButtonRef} type="button" className="button" onClick={openInvitationForm}>Inviter de nouveaux utilisateurs</button>}
+      </header>
+      {notice && <p role="status" className="form-success">{notice}</p>}
+      {error && !formModalOpen && <p role="alert" className="form-error">{error}</p>}
+      {formModalOpen && canEditForm && (
+        <div className="modal-overlay users-modal-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeUserForm() }}>
+          <section ref={formDialogRef} className="modal users-invitation-modal" role="dialog" aria-modal="true" aria-labelledby="users-form-modal-title">
+            <header className="users-form-modal-heading">
+              <div>
+                <span>{editingUser ? 'MODIFICATION DU COMPTE' : 'NOUVELLE INVITATION'}</span>
+                <h3 id="users-form-modal-title">{editingUser ? `Modifier ${editingUser.firstName} ${editingUser.lastName}` : 'Inviter des utilisateurs'}</h3>
+              </div>
+              <button ref={formCloseRef} type="button" className="users-modal-close" aria-label="Fermer le formulaire" disabled={submitting} onClick={closeUserForm}>×</button>
+            </header>
+            {error && <p role="alert" className="form-error">{error}</p>}
+            <form className="form users-invitation-form" key={editingUser?.id ?? 'new-user'} onSubmit={(e) => void submit(e)}>
+          {!editingUser ? (
             <>
               <label>
-                E-mail <input name="email" type="email" required />
+                Adresses e-mail
+                <textarea name="emails" value={invitationEmails} onChange={(event) => { setInvitationEmails(event.target.value); setInvitationValidationError('') }} placeholder="un@gmail.com, deux@gmail.com" rows={3} required aria-describedby="bulk-invitation-help" aria-invalid={Boolean(invitationValidationError)} />
               </label>
               <label>
-                Mot de passe initial <input name="password" type="password" minLength={12} required />
+                Rôle attribué
+                <select className="select-control" name="roleId" defaultValue="" required>
+                  <option value="" disabled>Choisir un rôle</option>
+                  {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+                </select>
               </label>
+              <p className={invitationValidationError ? 'form-error' : 'form-hint'} id="bulk-invitation-help" role={invitationValidationError ? 'alert' : undefined}>{invitationValidationError || 'Séparez les adresses par une virgule, un espace ou un retour à la ligne.'}</p>
+            </>
+          ) : (
+            <>
+              <label>
+                Prénom <input name="firstName" defaultValue={editingUser.firstName} required />
+              </label>
+              <label>
+                Nom <input name="lastName" defaultValue={editingUser.lastName} required />
+              </label>
+              <fieldset>
+                <legend>Rôles</legend>
+                {roles.map((role) => (
+                  <label key={role.id}>
+                    <input
+                      type="checkbox"
+                      name="roleIds"
+                      value={role.id}
+                      defaultChecked={editingUser.roles.some((entry) => entry.role.id === role.id)}
+                    />
+                    {role.name}
+                  </label>
+                ))}
+              </fieldset>
             </>
           )}
-          <fieldset>
-            <legend>Rôles</legend>
-            {roles.map((role) => (
-              <label key={role.id}>
-                <input
-                  type="checkbox"
-                  name="roleIds"
-                  value={role.id}
-                  defaultChecked={editingUser?.roles.some((entry) => entry.role.id === role.id) ?? false}
-                />
-                {role.name}
-              </label>
-            ))}
-          </fieldset>
           {editingUser && (
             <label>
               Statut
@@ -112,12 +310,36 @@ export function UsersPage({ user: currentUser }: { user: User }) {
             </label>
           )}
           <div className="form-actions">
-            {editingUser && <button type="button" className="btn-secondary" onClick={() => setEditingUser(null)}>Annuler</button>}
-            <button type="submit">{editingUser ? 'Enregistrer' : 'Créer'}</button>
+            <button type="button" className="btn-secondary" disabled={submitting} onClick={closeUserForm}>Annuler</button>
+            <button type="submit" disabled={submitting || (!editingUser && (!directoryLoaded || roles.length === 0))} aria-busy={submitting || undefined}>{submitting ? <><span className="button-spinner" aria-hidden="true" /> {editingUser ? 'Enregistrement…' : 'Envoi…'}</> : editingUser ? 'Enregistrer' : 'Envoyer les invitations'}</button>
           </div>
-        </form>
+            </form>
+          </section>
+        </div>
       )}
-      {error && <p role="alert" className="form-error">{error}</p>}
+      {invitationSentTo.length > 0 && (
+        <div className="confirmation-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeConfirmation() }}>
+          <section
+            className="confirmation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invitation-confirmation-title"
+            aria-describedby="invitation-confirmation-description"
+          >
+            <div className="confirmation-check" aria-hidden="true">
+              <svg viewBox="0 0 48 48" fill="none"><path d="m14 24 7 7 14-15" /></svg>
+            </div>
+            <span className="confirmation-eyebrow">Confirmation</span>
+            <h3 id="invitation-confirmation-title">{invitationSentTo.length === 1 ? 'Invitation envoyée !' : `${invitationSentTo.length} invitations envoyées !`}</h3>
+            <p id="invitation-confirmation-description">
+              {invitationSentTo.length === 1
+                ? 'Le courriel d’invitation a bien été envoyé.'
+                : `Les courriels d’invitation ont bien été envoyés à ${invitationSentTo.length} destinataires.`}
+            </p>
+            <button ref={closeConfirmationRef} type="button" onClick={closeConfirmation}>Fermer</button>
+          </section>
+        </div>
+      )}
       <table>
         <thead>
           <tr>
@@ -139,9 +361,9 @@ export function UsersPage({ user: currentUser }: { user: User }) {
               <td>{userRow.isActive ? 'Actif' : 'Inactif'}</td>
               {(can(currentUser, 'user', 'update') || can(currentUser, 'user', 'delete')) && (
                 <td>
-                  {can(currentUser, 'user', 'update') && <button type="button" onClick={() => setEditingUser(userRow)}>Modifier</button>}{' '}
+                  {can(currentUser, 'user', 'update') && <button type="button" onClick={() => openUserEditor(userRow)}>Modifier</button>}{' '}
                   {can(currentUser, 'user', 'delete') && userRow.id !== currentUser.id && (
-                    <button type="button" onClick={() => void remove(userRow)}>Supprimer</button>
+                    <button type="button" disabled={Boolean(removingUserId)} aria-busy={removingUserId === userRow.id || undefined} onClick={() => void remove(userRow)}>{removingUserId === userRow.id && <span className="button-spinner" aria-hidden="true" />} {removingUserId === userRow.id ? 'Suppression…' : 'Supprimer'}</button>
                   )}
                 </td>
               )}
@@ -149,6 +371,34 @@ export function UsersPage({ user: currentUser }: { user: User }) {
           ))}
         </tbody>
       </table>
+      <section className="invitation-list-section" aria-labelledby="invitation-list-title">
+        <h3 id="invitation-list-title">Invitations envoyées</h3>
+        <div className="table-container">
+          <table>
+            <thead><tr><th>Adresse e-mail</th><th>Rôle</th><th>Envoyée le</th><th>Expire le</th><th>Statut</th><th>Action</th></tr></thead>
+            <tbody>
+              {invitations.map((invitation) => {
+                const status = invitation.acceptedAt
+                  ? 'approved'
+                  : new Date(invitation.expiresAt).getTime() <= statusClock
+                    ? 'expired'
+                    : 'pending'
+                return (
+                  <tr key={invitation.id}>
+                  <td>{invitation.email}</td>
+                  <td>{invitation.role.name}</td>
+                  <td><time dateTime={invitation.createdAt}>{new Date(invitation.createdAt).toLocaleString('fr-FR')}</time></td>
+                  <td><time dateTime={invitation.expiresAt}>{new Date(invitation.expiresAt).toLocaleString('fr-FR')}</time></td>
+                  <td><span className={`status-badge ${status === 'approved' ? 'success' : status === 'expired' ? 'warning' : ''}`}>{status === 'approved' ? 'Acceptée' : status === 'expired' ? 'Expirée' : 'En attente'}</span></td>
+                  <td>{status !== 'approved' && can(currentUser, 'user', 'create') ? <button type="button" className="btn-secondary" disabled={Boolean(resendingId)} aria-busy={resendingId === invitation.id || undefined} onClick={() => void resendInvitation(invitation)}>{resendingId === invitation.id ? <><span className="button-spinner" aria-hidden="true" /> Envoi…</> : 'Renvoyer'}</button> : '—'}</td>
+                  </tr>
+                )
+              })}
+              {invitations.length === 0 && <tr><td colSpan={6} className="centered">Aucune invitation envoyée.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>
   )
 }
@@ -157,6 +407,8 @@ export function ProductsPage({ user }: { user: User }) {
   const [products, setProducts] = useState<Product[]>([])
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [isAdding, setIsAdding] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     void loadProducts()
@@ -168,7 +420,8 @@ export function ProductsPage({ user }: { user: User }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const element = event.currentTarget
+    const form = new FormData(element)
     const status = String(form.get('status') || 'ACTIVE') as Product['status']
     const data = {
       sku: String(form.get('sku')),
@@ -178,16 +431,23 @@ export function ProductsPage({ user }: { user: User }) {
       status,
     }
 
-    if (editingProduct) {
-      await api.products.update(editingProduct.id, data)
-    } else {
-      await api.products.create(data)
+    setSaving(true)
+    setError('')
+    try {
+      if (editingProduct) {
+        await api.products.update(editingProduct.id, data)
+      } else {
+        await api.products.create(data)
+      }
+      await loadProducts()
+      element.reset()
+      setIsAdding(false)
+      setEditingProduct(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible d’enregistrer le produit.')
+    } finally {
+      setSaving(false)
     }
-    
-    await loadProducts()
-    event.currentTarget.reset()
-    setIsAdding(false)
-    setEditingProduct(null)
   }
 
   return (
@@ -203,6 +463,7 @@ export function ProductsPage({ user }: { user: User }) {
         <div className="modal-overlay">
           <div className="modal">
             <h3>{editingProduct ? 'Modifier le produit' : 'Nouveau produit'}</h3>
+            {error && <p role="alert" className="form-error">{error}</p>}
             <form className="form" onSubmit={(e) => void submit(e)}>
               <label>
                 Référence (SKU)
@@ -229,8 +490,8 @@ export function ProductsPage({ user }: { user: User }) {
                 </select>
               </label>
               <div className="form-actions">
-                <button type="button" className="btn-secondary" onClick={() => { setIsAdding(false); setEditingProduct(null); }}>Annuler</button>
-                <button type="submit">Enregistrer</button>
+                <button type="button" className="btn-secondary" disabled={saving} onClick={() => { setIsAdding(false); setEditingProduct(null); }}>Annuler</button>
+                <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Enregistrement…' : 'Enregistrer'}</button>
               </div>
             </form>
           </div>
@@ -276,6 +537,8 @@ export function ProductsPage({ user }: { user: User }) {
 
 export function ImportPage() {
   const [result, setResult] = useState<string>('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -288,24 +551,33 @@ export function ImportPage() {
         const [firstName, lastName, companyName, email, phone] = line.split(';')
         return { firstName, lastName, companyName, email, phone }
       })
-    const res = await api.importLeads(rows)
-    setResult(
-      res.results
-        .map((row) => `Ligne ${row.index + 1} : ${row.status}${row.message ? ` (${row.message})` : ''}`)
-        .join('\n'),
-    )
+    setSaving(true)
+    setError('')
+    try {
+      const res = await api.importLeads(rows)
+      setResult(
+        res.results
+          .map((row) => `Ligne ${row.index + 1} : ${row.status}${row.message ? ` (${row.message})` : ''}`)
+          .join('\n'),
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible d’importer les prospects.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <>
       <h2>Import de prospects</h2>
       <p>Une ligne par prospect, colonnes séparées par un point-virgule : prénom ; nom ; entreprise ; e-mail ; téléphone.</p>
+      {error && <p role="alert" className="form-error">{error}</p>}
       <form className="form" onSubmit={(e) => void submit(e)}>
         <label>
           Données
           <textarea name="csv" rows={8} required placeholder="Awa;Diallo;SESUR;awa@sesur.bj;+22990000000" />
         </label>
-        <button type="submit">Importer</button>
+        <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Importation…' : 'Importer'}</button>
       </form>
       {result && <pre>{result}</pre>}
     </>
@@ -348,24 +620,36 @@ export function AuditPage() {
 
 export function ProfilePage({ onPasswordChanged }: { onPasswordChanged: () => void }) {
   const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    await changePassword(String(form.get('currentPassword')), String(form.get('newPassword')))
-    setMessage('Mot de passe mis à jour. Reconnectez-vous.')
-    onPasswordChanged()
+    setSaving(true)
+    setError('')
+    try {
+      await changePassword(String(form.get('currentPassword')), String(form.get('newPassword')))
+      setMessage('Mot de passe mis à jour. Reconnectez-vous.')
+      onPasswordChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible de modifier le mot de passe.')
+    } finally {
+      setSaving(false)
+    }
   }
   return (
     <>
       <h2>Mon profil</h2>
+      {error && <p role="alert" className="form-error">{error}</p>}
       <form className="form" onSubmit={(e) => void submit(e)}>
         <label>
           Mot de passe actuel <input name="currentPassword" type="password" required />
         </label>
         <label>
-          Nouveau mot de passe <input name="newPassword" type="password" minLength={12} required />
+          Nouveau mot de passe <input name="newPassword" type="password" minLength={8} required />
         </label>
-        <button type="submit">Changer le mot de passe</button>
+        <p className="form-hint">8 caractères minimum, avec une majuscule, un chiffre et un caractère spécial.</p>
+        <button type="submit" disabled={saving} aria-busy={saving || undefined}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? 'Enregistrement…' : 'Changer le mot de passe'}</button>
       </form>
       {message && <p>{message}</p>}
     </>

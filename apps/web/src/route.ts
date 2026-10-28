@@ -1,4 +1,5 @@
 export type Route =
+  | { name: 'register'; token?: string }
   | { name: 'home' }
   | { name: 'leads' }
   | { name: 'lead-new' }
@@ -29,7 +30,12 @@ export type Route =
   | { name: 'quote-edit'; id: string }
   | { name: 'not-found' }
 export function parseHash(hash: string): Route {
-  const path = hash.replace(/^#/, '') || '/'
+  const fullPath = hash.replace(/^#/, '') || '/'
+  const [path, query = ''] = fullPath.split('?', 2)
+  if (path === '/inscription') {
+    const token = new URLSearchParams(query).get('token')
+    return token ? { name: 'register', token } : { name: 'register' }
+  }
   const parts = path.split('/').filter(Boolean)
   if (parts.length === 0) return { name: 'home' }
   if (parts[0] === 'leads' && parts[1] === 'nouveau') return { name: 'lead-new' }

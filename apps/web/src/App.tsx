@@ -1,36 +1,49 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { User } from './api'
 import { can } from './api'
-import { LoginPage } from './LoginPage'
 import { useAuth } from './auth/useAuth'
-import { QuotesPage, QuoteFormPage, QuoteDetailPage, QuoteEditPage } from './pages/QuotesPage'
-import {
-  AuditPage,
-  ImportPage,
-  ProductsPage,
-  ProfilePage,
-  UsersPage,
-} from './pages/AdminPages'
-import {
-  ClientDetailPage,
-  ClientFormPage,
-  ClientsPage,
-  ContactDetailPage,
-  ContactFormPage,
-  ContactsPage,
-  HomePage,
-  LeadDetailPage,
-  LeadFormPage,
-  LeadsPage,
-  OpportunitiesPage,
-  OpportunityFormPage,
-  OpportunityDetailPage,
-} from './pages/CrmPages'
 import { parseHash, type Route } from './route'
-import { CalendarPage, TasksPage } from './pages/ActivityPages'
-import { ContractsPage, TicketDetailPage, TicketsPage } from './pages/SupportPages'
-import { IntegrationsPage } from './pages/IntegrationsPage'
 import sesurLogo from '../../../logo-1.png'
+
+// Keep infrequently used screens out of the initial download. Vite creates a
+// separate chunk for each feature module and loads it when its route is opened.
+const LoginPage = lazy(() => import('./LoginPage').then(({ LoginPage }) => ({ default: LoginPage })))
+const RegistrationPage = lazy(() => import('./RegistrationPage').then(({ RegistrationPage }) => ({ default: RegistrationPage })))
+const TotpChallengePage = lazy(() => import('./TotpChallengePage').then(({ TotpChallengePage }) => ({ default: TotpChallengePage })))
+
+const QuotesPage = lazy(() => import('./pages/QuotesPage').then(({ QuotesPage }) => ({ default: QuotesPage })))
+const QuoteFormPage = lazy(() => import('./pages/QuotesPage').then(({ QuoteFormPage }) => ({ default: QuoteFormPage })))
+const QuoteDetailPage = lazy(() => import('./pages/QuotesPage').then(({ QuoteDetailPage }) => ({ default: QuoteDetailPage })))
+const QuoteEditPage = lazy(() => import('./pages/QuotesPage').then(({ QuoteEditPage }) => ({ default: QuoteEditPage })))
+
+const AuditPage = lazy(() => import('./pages/AdminPages').then(({ AuditPage }) => ({ default: AuditPage })))
+const ImportPage = lazy(() => import('./pages/AdminPages').then(({ ImportPage }) => ({ default: ImportPage })))
+const ProductsPage = lazy(() => import('./pages/AdminPages').then(({ ProductsPage }) => ({ default: ProductsPage })))
+const ProfilePage = lazy(() => import('./pages/AdminPages').then(({ ProfilePage }) => ({ default: ProfilePage })))
+const UsersPage = lazy(() => import('./pages/AdminPages').then(({ UsersPage }) => ({ default: UsersPage })))
+
+const ClientDetailPage = lazy(() => import('./pages/CrmPages').then(({ ClientDetailPage }) => ({ default: ClientDetailPage })))
+const ClientFormPage = lazy(() => import('./pages/CrmPages').then(({ ClientFormPage }) => ({ default: ClientFormPage })))
+const ClientsPage = lazy(() => import('./pages/CrmPages').then(({ ClientsPage }) => ({ default: ClientsPage })))
+const ContactDetailPage = lazy(() => import('./pages/CrmPages').then(({ ContactDetailPage }) => ({ default: ContactDetailPage })))
+const ContactFormPage = lazy(() => import('./pages/CrmPages').then(({ ContactFormPage }) => ({ default: ContactFormPage })))
+const ContactsPage = lazy(() => import('./pages/CrmPages').then(({ ContactsPage }) => ({ default: ContactsPage })))
+const HomePage = lazy(() => import('./pages/CrmPages').then(({ HomePage }) => ({ default: HomePage })))
+const LeadDetailPage = lazy(() => import('./pages/CrmPages').then(({ LeadDetailPage }) => ({ default: LeadDetailPage })))
+const LeadFormPage = lazy(() => import('./pages/CrmPages').then(({ LeadFormPage }) => ({ default: LeadFormPage })))
+const LeadsPage = lazy(() => import('./pages/CrmPages').then(({ LeadsPage }) => ({ default: LeadsPage })))
+const OpportunitiesPage = lazy(() => import('./pages/CrmPages').then(({ OpportunitiesPage }) => ({ default: OpportunitiesPage })))
+const OpportunityFormPage = lazy(() => import('./pages/CrmPages').then(({ OpportunityFormPage }) => ({ default: OpportunityFormPage })))
+const OpportunityDetailPage = lazy(() => import('./pages/CrmPages').then(({ OpportunityDetailPage }) => ({ default: OpportunityDetailPage })))
+
+const CalendarPage = lazy(() => import('./pages/ActivityPages').then(({ CalendarPage }) => ({ default: CalendarPage })))
+const TasksPage = lazy(() => import('./pages/ActivityPages').then(({ TasksPage }) => ({ default: TasksPage })))
+const ContractsPage = lazy(() => import('./pages/SupportPages').then(({ ContractsPage }) => ({ default: ContractsPage })))
+const TicketDetailPage = lazy(() => import('./pages/SupportPages').then(({ TicketDetailPage }) => ({ default: TicketDetailPage })))
+const TicketsPage = lazy(() => import('./pages/SupportPages').then(({ TicketsPage }) => ({ default: TicketsPage })))
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage').then(({ IntegrationsPage }) => ({ default: IntegrationsPage })))
+
+const pageLoading = <p className="centered" role="status">Chargement de la page…</p>
 
 type AccessRequirement = { resource: string; action: string }
 
@@ -71,6 +84,7 @@ function requiredAccess(route: Route): AccessRequirement | null {
     case 'import': return { resource: 'import', action: 'create' }
     case 'audit': return { resource: 'audit', action: 'read' }
     case 'integrations': return { resource: 'integration', action: 'read' }
+    case 'register':
     case 'home':
     case 'profile':
     case 'not-found':
@@ -102,6 +116,8 @@ function Screen({ route, user, onPasswordChanged }: { route: Route; user: User; 
   }
 
   switch (route.name) {
+    case 'register':
+      return <div className="panel surface-panel centered-panel"><h2>Inscription</h2><p>Utilisez le lien d’invitation reçu par e-mail.</p></div>
     case 'home':
       return <HomePage user={user} />
     case 'leads':
@@ -206,6 +222,7 @@ function NavLink({ href, label, current, icon }: { href: string; label: string; 
 
 function routeTitle(route: Route): string {
   const titles: Record<Route['name'], string> = {
+    register: 'Inscription',
     home: 'Vue d’ensemble', leads: 'Prospects', 'lead-new': 'Nouveau prospect', lead: 'Fiche prospect',
     clients: 'Clients', 'client-new': 'Nouveau client', client: 'Fiche client', contacts: 'Contacts',
     'contact-new': 'Nouveau contact', contact: 'Fiche contact', users: 'Utilisateurs', products: 'Catalogue',
@@ -218,8 +235,7 @@ function routeTitle(route: Route): string {
   return titles[route.name]
 }
 
-function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
-  const route = useRoute()
+function Workspace({ user, onSignOut, route }: { user: User; onSignOut: () => void; route: Route }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
   const mobileNavToggleRef = useRef<HTMLButtonElement>(null)
@@ -360,7 +376,9 @@ function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
           </div>
         </header>
         <div className="page-content" key={`${route.name}-${'id' in route ? route.id : ''}`}>
-          <Screen route={route} user={user} onPasswordChanged={onSignOut} />
+          <Suspense fallback={pageLoading}>
+            <Screen route={route} user={user} onPasswordChanged={onSignOut} />
+          </Suspense>
         </div>
       </main>
     </div>
@@ -369,6 +387,18 @@ function Workspace({ user, onSignOut }: { user: User; onSignOut: () => void }) {
 
 function App() {
   const { state, signOut } = useAuth()
+  const route = useRoute()
+
+  if (route.name === 'register') {
+    const registrationChallenge = state.status === 'totp-challenge' && state.flow === 'registration'
+      ? state.challenge
+      : undefined
+    return (
+      <Suspense fallback={pageLoading}>
+        <RegistrationPage token={route.token} challenge={registrationChallenge} />
+      </Suspense>
+    )
+  }
 
   switch (state.status) {
     case 'loading':
@@ -380,9 +410,11 @@ function App() {
         </p>
       )
     case 'anonymous':
-      return <LoginPage />
+      return <Suspense fallback={pageLoading}><LoginPage /></Suspense>
+    case 'totp-challenge':
+      return <Suspense fallback={pageLoading}><TotpChallengePage challenge={state.challenge} /></Suspense>
     case 'authenticated':
-      return <Workspace user={state.user} onSignOut={() => void signOut()} />
+      return <Workspace user={state.user} onSignOut={() => void signOut()} route={route} />
   }
 }
 
